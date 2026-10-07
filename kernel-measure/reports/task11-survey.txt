@@ -1,0 +1,45 @@
+Task 11 survey — util_est for placement (7.2.9-baseline, read-only)
+====================================================================
+Date: Tue Oct 6 2026 (America/Phoenix)
+Tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (NOT modified)
+
+Roadmap ask
+  "Use the fast util estimate for placement; do not rip out PELT."
+  Status Open, Impact Medium. UTIL_EST already on. Fixed-window (Android
+  WALT) is the published alternative for the ramp. schedutil depends on PELT.
+
+What stock already does
+  - SCHED_FEAT(UTIL_EST, true) in kernel/sched/features.h; live debugfs shows
+    UTIL_EST (not NO_UTIL_EST). Toggleable: echo NO_UTIL_EST|UTIL_EST >
+    /sys/kernel/debug/sched/features.
+  - util_est_update() on dequeue (UPDATE_UTIL_EST): snaps EWMA up on util
+    increases; decays with weight w=1/4 (UTIL_EST_WEIGHT_SHIFT) on decreases;
+    skips if ~1% close or runnable >> util (could not get wanted CPU time).
+  - util_est_enqueue/dequeue maintain cfs_rq->avg.util_est sum of runnable
+    tasks' _task_util_est.
+  - task_util_est(p) = max(task_util(p) /*PELT*/, _task_util_est(p)).
+  - Placement / capacity paths that already read util_est:
+      task_fits_cpu(), find_energy_efficient_cpu / asym fits,
+      cpu_util() takes max(util_avg, util_est) when UTIL_EST on,
+      eenv busy_time / compute_energy, load-balance can_migrate via
+      task_util_est at several call sites.
+  - Holdouts using bare task_util(): cache-aware LLC migrate helpers
+    (can_migrate_llc / alb_break_llc). Irrelevant on this box (1 LLC).
+
+What this hardware cannot excite
+  - No Energy Model (no /sys/kernel/debug/energy_model) → EAS path idle.
+  - Homogeneous Xeon E-2386G (cpu_capacity=1024 all CPUs) → asym capacity
+    fitting is a no-op.
+  - 1 socket / 1 NUMA / 1×12 MiB L3 → cross-LLC util-aware placement N/A.
+
+WALT / fixed-window alternative
+  Would replace or parallel PELT ramp with a fixed window. That is a major
+  scheduler redesign; roadmap explicitly says do not remove PELT (schedutil
+  depends on it). Not a gated one-feature patch. Deferred / out of scope.
+
+Conclusion for Task 11 decision tree
+  Prefer measuring stock UTIL_EST ON vs debugfs NO_UTIL_EST on the same
+  baseline kernel with a bursty on/off workload. No kernel patch unless a
+  clear bug or gated improvement appears. Expected likely outcome: stock
+  already correct (policy/in-tree PASS or INCONCLUSIVE if knob A/B is noise
+  on this homogeneous single-LLC box).

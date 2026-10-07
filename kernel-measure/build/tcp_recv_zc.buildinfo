@@ -1,0 +1,5 @@
+source=/home/kernelmaster/kernel-measure/workloads/src/tcp_recv_zc.c
+source_sha256=03a3340e444227f3f276b8291181de78dc824ce2ba10dd6e40a21d58aba6ffef
+compiler=cc
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+built=2026-10-06T04:02:01+0000

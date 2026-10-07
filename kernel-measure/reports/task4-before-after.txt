@@ -1,0 +1,97 @@
+Task 4 (TCP recv zero-copy path) — BLOCKED on this host
+=======================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+NIC:  Intel X550 (enp3s0f0/enp3s0f1), driver ixgbe
+Stock measured: Mon Oct 5 2026, 21:05 PT (= 04:05 UTC Oct 6) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 4 --schedstats
+Workload: tcp_recv_zc = build/tcp_recv_zc -d 10 -c 64 -i enp3s0f0
+Every run status=ok. Fixed ~10s wall — wall_time_sec is not a free variable.
+No patched kernel was built. Baseline tree linux-7.2.9-baseline was not modified.
+
+Kernels /boot present
+  stock   : 7.2.9-baseline (measured)
+  also    : 7.2.9-ai-opt, 7.2.9-t3, 7.2.9-t9, 7.0.0-34-generic
+  (returned host to 7.2.9-t9 after stock measure; no t4 image installed)
+
+Survey (Phase 1)
+  uname at start of task: 7.2.9-t9
+  Baseline tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (not modified).
+  In-tree ZC recv paths already present and ENABLED in .config:
+    CONFIG_IO_URING_ZCRX=y
+    CONFIG_NET_DEVMEM=y
+    CONFIG_PAGE_POOL=y
+  Source present: io_uring/zcrx.c, net/core/devmem.c, tcp_recvmsg_dmabuf(),
+  Documentation/networking/{iou-zcrx,devmem}.rst.
+
+  Both ZC paths require NIC hardware features the docs call out:
+    - Header/data split (ethtool tcp-data-split)
+    - Flow steering + RSS carve-out for ZC queues
+    - Driver memory-provider / queue_mgmt support so payloads land in
+      registered userspace/dmabuf memory (headers still go to kernel)
+
+  Evidence this host cannot use either path:
+    1. ethtool -g enp3s0f0: "TCP data split: n/a", "HDS thresh: n/a"
+    2. sudo ethtool -G enp3s0f0 tcp-data-split on ->
+         "setting TCP data split is not supported" / EOPNOTSUPP
+    3. Driver is ixgbe for Intel X550 — no tcp-data-split / memory-provider
+       path usable on this NIC (ZC selftests target mlx5/bnxt/ice-class HW).
+    4. Loopback has no HW RX queue memory provider.
+    5. IORING_REGISTER_ZCRX_IFQ as root on enp3s0f0 and lo:
+         errno=95 (EOPNOTSUPP). Without CAP_NET_ADMIN: errno=1 (EPERM).
+    6. MSG_SOCK_DEVMEM recvmsg on localhost TCP: receives bytes but no
+       SCM_DEVMEM_* cmsg (errno recorded as ENODATA / 61 in probe).
+    7. ZCRX_REG_NODEV exists but docs say "All data will be copied" —
+       that is a copy fallback, not a zero-copy win, so it was not used
+       as a pass path.
+
+  A minimal "unlock socket during skb_copy_datagram_msg" kernel change was
+  considered and rejected: not clearly safe (concurrent writers / TOCTOU
+  under sk_lock), and would not be an enablement of the in-tree ZC path the
+  roadmap points at. No fake kernel win.
+
+Harness
+  Task 4 previously used generic networking+database (iperf3 / sqlite),
+  which do not probe or exercise ZC. Added targeted workload tcp_recv_zc
+  (classic recv hammer + ZC probes) and rewired tasks.conf Task 4 ->
+  tcp_recv_zc. Synced /workspace/kernel-measure <-> server.
+
+What was attempted
+  - Survey configs, docs, ixgbe capabilities, zcrx/devmem selftest requirements.
+  - Elevated HW probe (reports/task4-survey.txt).
+  - New workload + 3x stock measure on 7.2.9-baseline.
+  - No linux-7.2.9-t4 tree, no 0004-*.patch, no rebuild: nothing to enable
+    on this NIC without inventing unsupported HW offload.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261006T040504+0000-task4   (runs/BASELINE-task4 -> this)
+  stock S2  20261006T040515+0000-task4
+  stock S3  20261006T040526+0000-task4
+  patched: none (BLOCKED)
+
+Stock classic-path numbers (7.2.9-baseline, tcp_recv_zc -d 10 -c 64)
+  metric                         S1            S2            S3
+  wl_bytes_per_sec (x1e9)      8.160         8.092         7.728
+  wl_zc_available                 0             0             0
+  cycles (x1e9)                76.41         76.35         73.65
+  instructions (x1e9)          75.39         74.54         71.07
+  wall_time_sec                10.090        10.067        10.067
+  cache_misses (x1e3)         519.5         406.7         327.4
+
+  wl_zc_* probe errnos (non-root collect): zcrx EPERM(1); elevated survey
+  on t9: zcrx EOPNOTSUPP(95). Both mean ZC path not usable here.
+
+Verdict: BLOCKED
+  - Pass criteria require lower cycles/wall "when zero-copy path is used".
+  - Zero-copy path cannot be used on this NIC (no HDS / memory provider).
+  - Stock classic path measured and archived as BASELINE-task4.
+  - Recommendation: skip to Task 5. Revisit Task 4 only on a host with a
+    NIC+driver that supports header/data split and page-pool memory
+    providers (e.g. mlx5 / equivalent), then measure classic vs
+    io_uring zcrx / MSG_SOCK_DEVMEM on that hardware.
+
+Report / artifact paths
+  /home/kernelmaster/kernel-measure/reports/task4-before-after.txt
+  /home/kernelmaster/kernel-measure/reports/task4-survey.txt
+  /workspace/kernel-measure/reports/task4-before-after.txt  (synced)
+  Workload: workloads/src/tcp_recv_zc.c, workloads/tcp_recv_zc.sh
+  No patch. No linux-7.2.9-t4 tree.

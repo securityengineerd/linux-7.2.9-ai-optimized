@@ -1,0 +1,63 @@
+uname=7.2.9-t9
+--- ethtool -g ---
+Ring parameters for enp3s0f0:
+Pre-set maximums:
+RX:			32768
+RX Mini:		n/a
+RX Jumbo:		n/a
+TX:			32768
+TX push buff len:	n/a
+HDS thresh:		n/a
+Current hardware settings:
+RX:			512
+RX Mini:		n/a
+RX Jumbo:		n/a
+TX:			512
+RX Buf Len:		n/a
+CQE Size:		n/a
+TX Push:		off
+RX Push:		off
+TX push buff len:	n/a
+TCP data split:		n/a
+HDS thresh:		n/a
+--- set tcp-data-split ---
+netlink error: setting TCP data split is not supported (offset 40)
+netlink error: Operation not supported
+--- ethtool -i ---
+driver: ixgbe
+version: 7.2.9-t9
+firmware-version: 0x80001138, 1.2684.0
+expansion-rom-version: 
+bus-info: 0000:03:00.0
+supports-statistics: yes
+supports-test: yes
+supports-eeprom-access: yes
+supports-register-dump: yes
+supports-priv-flags: yes
+--- ethtool -k ntuple ---
+--- CONFIG ---
+CONFIG_NET_DEVMEM=y
+CONFIG_IO_URING_ZCRX=y
+--- ixgbe memory_provider in modules? ---
+description:    Intel(R) 10 Gigabit PCI Express Network Driver
+parm:           max_vfs:Maximum number of virtual functions to allocate per physical function - default is zero and maximum value is 63. (Deprecated) (uint)
+parm:           allow_unsupported_sfp:Allow unsupported and untested SFP+ modules on 82599-based adapters (bool)
+parm:           debug:Debug level (0=none,...,16=all) (int)
+--- zcrx register as root (expect EOPNOTSUPP / driver lack) ---
+wl_recv_bytes=8480161792 wl_bytes_per_sec=8480121189 wl_zc_available=0
+wl_engine=tcp_recv_zc
+wl_path=classic_recv
+wl_duration_sec=1
+wl_chunk_kb=64
+wl_recv_bytes=8480161792
+wl_wall_ns=1000004788
+wl_bytes_per_sec=8480121189
+wl_zc_available=0
+wl_zc_devmem=0
+wl_zc_devmem_errno=61
+wl_zc_zcrx_iface=0
+wl_zc_zcrx_iface_errno=95
+wl_zc_zcrx_lo=0
+wl_zc_zcrx_lo_errno=95
+wl_probe_iface=enp3s0f0
+wl_note=zc_needs_nic_hds_memory_provider_flow_steer

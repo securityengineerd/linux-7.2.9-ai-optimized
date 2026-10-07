@@ -1,0 +1,70 @@
+Task 12 survey — softirq / RCU on irq-exit (Linux 7.2.9)
+=========================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, 12 CPUs, 1 LLC, 1 NUMA)
+Trees: linux-7.2.9-baseline (read-only survey), live kernel at survey time: 7.2.9-t9
+Date: Tue Oct 6 2026 PT
+
+Roadmap ask
+  "Move softirq and RCU callback storms out of irq-exit where tail latency
+   matters." Impact: Medium for tail latency; Low if nocb and RT already on.
+  Better mechanism cited: already config, not new code —
+     CONFIG_PREEMPT_RT threads softirq;
+     CONFIG_RCU_NOCB_CPU moves callbacks to kthreads.
+  "Always deferring costs throughput, so this is a workload choice."
+
+What 7.2.9 already does (source: kernel/softirq.c, kernel/rcu/tree*.c)
+  1. irq_exit / irq_exit_rcu → __irq_exit_rcu():
+       if (!in_interrupt() && local_softirq_pending()) invoke_softirq().
+  2. invoke_softirq() (non-PREEMPT_RT):
+       if (!force_irqthreads() || !ksoftirqd): run __do_softirq() /
+       do_softirq_own_stack() INLINE on the irq-exit path;
+       else: wakeup_softirqd().
+  3. handle_softirqs(): budget MAX_SOFTIRQ_TIME = 2 ms and
+       MAX_SOFTIRQ_RESTART = 10; overflow wakes ksoftirqd.
+  4. CONFIG_SOFTIRQ_ON_OWN_STACK=y on this build.
+  5. CONFIG_IRQ_FORCED_THREADING=y; force_irqthreads() is a static key
+       enabled by boot param "threadirqs" (early_param in kernel/irq/manage.c).
+       Without threadirqs, softirq still runs inline on irq-exit.
+  6. CONFIG_PREEMPT_RT is NOT set. PREEMPT_LAZY=y, PREEMPT_DYNAMIC=y.
+  7. RCU: CONFIG_RCU_NOCB_CPU=y but CONFIG_RCU_NOCB_CPU_DEFAULT_ALL is not
+       set. Live cmdline has no rcu_nocbs=… so no CPUs are offloaded;
+       no rcuo* kthreads expected until nocb is enabled.
+  8. rcutree.use_softirq defaults to Y (!PREEMPT_RT). When Y, invoke_rcu_core()
+       raise_softirq(RCU_SOFTIRQ) — RCU core work shares the softirq budget
+       on irq-exit. Module param is 0444 (boot-time only:
+       rcutree.use_softirq=0 → rcuc/* kthreads instead).
+  9. Existing ksoftirqd/N per CPU already drains overflow; they do NOT move
+       the common-case softirq off irq-exit by themselves.
+ 10. net.core.netdev_budget=300 / netdev_budget_usecs=2000 — NAPI/softirq
+       spend caps, not an irq-exit offload.
+
+Live knobs at survey (7.2.9-t9)
+  cmdline: no threadirqs, no rcu_nocbs, no rcutree.use_softirq=
+  /sys/module/rcutree/parameters/use_softirq = Y
+  ksoftirqd/0..11 present; rcu_preempt / rcu_exp* present; no rcuo*
+  softirq vectors active: TIMER, NET_RX, NET_TX, SCHED, RCU, …
+
+Implication for Task 12
+  Softirq (including RCU_SOFTIRQ) STILL runs on the irq-exit path up to the
+  2 ms / 10-restart budget on stock. The roadmap's "better mechanism" is
+  already in-tree as boot/config policy:
+    - rcu_nocbs=<cpulist>     → offload callbacks to rcuo* (needs reboot)
+    - rcutree.use_softirq=0   → RCU core via rcuc kthreads (boot param)
+    - threadirqs              → force_irqthreads → invoke_softirq wakes
+                                ksoftirqd instead of running inline
+    - CONFIG_PREEMPT_RT       → full softirq threading (not enabled; would
+                                be a different kernel flavour, not a patch)
+  No new irq_exit rewrite is justified before measuring these knobs.
+  A gated patch that always defers would fight the roadmap's own warning
+  about throughput cost and would need a default-OFF sysctl — still a
+  weaker choice than documenting the existing knobs.
+
+Planned measurement
+  New workload softirq_storm: timerfd + UDP loopback + mmap/munmap RCU
+  churn, with wake-latency sampler; wrapper records /proc/softirqs and
+  ksoftirqd ms deltas plus stall dmesg.
+  A/B on 7.2.9-baseline:
+    STOCK  = no deferral knobs (prove softirq visible on irq path)
+    DEFER  = threadirqs rcu_nocbs=0-11 rcutree.use_softirq=0
+  Prefer PASS (policy) if DEFER is a pure workload choice / noise-bound /
+  throughput tradeoff, rather than shipping a new kernel default.

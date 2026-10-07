@@ -1,0 +1,432 @@
+=================== S1 vs P1 (20261005T032835+0000-task1 -> 20261005T033314+0000-task1)
+before: runs/20261005T032835+0000-task1
+after:  runs/20261005T033314+0000-task1
+delta = after - before
+task 1: per-LLC idle bitmap
+measures: Wake-to-run latency and idle-search cost under multi-core wakes
+workloads: wake_llc general
+primary metrics: wl_idle_wake_lat_p50_ns wl_idle_wake_lat_p99_ns wl_busy_wake_lat_p50_ns wl_busy_wake_lat_p99_ns rq_latency_ns ttwu_remote_delta ttwu_count_delta cpu_migrations context_switches cache_misses cache_misses_per_kinstr cycles instructions ipc
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-llc-idle
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.103             20.114           0.011000       +0.05%
+wl_idle_wake_lat_p50_ns                    49500              19750             -29750      -60.10%
+wl_idle_wake_lat_p99_ns                    65750              85000              19250      +29.28%
+wl_busy_wake_lat_p50_ns                    14750              19500               4750      +32.20%
+wl_busy_wake_lat_p99_ns                    41250              66250              25000      +60.61%
+rq_latency_ns (schedstat)                   4934               8777               3843      +77.89%
+ttwu_remote_delta                         454965             458452               3487       +0.77%
+ttwu_count_delta                          563016             561842              -1174       -0.21%
+cpu_migrations                              6192              63949              57757     +932.77%
+context_switches                          566956             564446              -2510       -0.44%
+cache-misses                              420381             394248             -26133       -6.22%
+cache_misses_per_kinstr                    0.001              0.001           0.000000       +0.00%
+cycles                              329476792090       335539811050         6063018960       +1.84%
+instructions                        431748234927       396142901968       -35605332959       -8.25%
+ipc                                        1.310              1.181          -0.129000       -9.85%
+wl_busy_cpu_changed_permille                  13                 73                 60     +461.54%
+wl_busy_missed_periods                         1                  4                  3     +300.00%
+wl_busy_on_waker_cpu_permille                165                202                 37      +22.42%
+wl_busy_rounds                             19998              19994                 -4       -0.02%
+wl_busy_wake_lat_max_ns                  2660186            2794224             134038       +5.04%
+wl_busy_wake_lat_mean_ns                   15152              22012               6860      +45.27%
+wl_busy_wake_lat_p90_ns                    27750              46250              18500      +66.67%
+wl_busy_wake_lat_p999_ns                   59000              91000              32000      +54.24%
+wl_busy_wakes                             239976             239928                -48       -0.02%
+wl_idle_cpu_changed_permille                   0                147                147          n/a
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 79                 50                -29      -36.71%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   227906             183039             -44867      -19.69%
+wl_idle_wake_lat_mean_ns                   34594              28300              -6294      -18.19%
+wl_idle_wake_lat_p90_ns                    58750              61500               2750       +4.68%
+wl_idle_wake_lat_p999_ns                   80000             101500              21500      +26.88%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-llc-idle
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.078             10.074          -0.004000       -0.04%
+rq_latency_ns (schedstat)               3802               3686               -116       -3.05%
+ttwu_remote_delta                      77488              78607               1119       +1.44%
+ttwu_count_delta                       93512              94358                846       +0.90%
+cpu_migrations                          1867               1626               -241      -12.91%
+context_switches                       76657              77951               1294       +1.69%
+cache-misses                       255503703          250827355           -4676348       -1.83%
+cache_misses_per_kinstr                1.011              0.977          -0.034000       -3.36%
+cycles                          156919455885       158611840505         1692384620       +1.08%
+instructions                    252691118504       256752909503         4061790999       +1.61%
+ipc                                    1.610              1.619           0.009000       +0.56%
+
+pass/fail note (judge by hand, across repeated runs): Lower wake-to-run latency and fewer remote wakeups under multi-core idle search
+No verdict is computed. One run per side is not enough to claim a win.
+=================== S2 vs P2 (20261005T032918+0000-task1 -> 20261005T033351+0000-task1)
+before: runs/20261005T032918+0000-task1
+after:  runs/20261005T033351+0000-task1
+delta = after - before
+task 1: per-LLC idle bitmap
+measures: Wake-to-run latency and idle-search cost under multi-core wakes
+workloads: wake_llc general
+primary metrics: wl_idle_wake_lat_p50_ns wl_idle_wake_lat_p99_ns wl_busy_wake_lat_p50_ns wl_busy_wake_lat_p99_ns rq_latency_ns ttwu_remote_delta ttwu_count_delta cpu_migrations context_switches cache_misses cache_misses_per_kinstr cycles instructions ipc
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-llc-idle
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.087             20.084          -0.003000       -0.01%
+wl_idle_wake_lat_p50_ns                    49250              52250               3000       +6.09%
+wl_idle_wake_lat_p99_ns                    86500              69250             -17250      -19.94%
+wl_busy_wake_lat_p50_ns                    14250              25000              10750      +75.44%
+wl_busy_wake_lat_p99_ns                    39750              92000              52250     +131.45%
+rq_latency_ns (schedstat)                   5241              11294               6053     +115.49%
+ttwu_remote_delta                         461420             439825             -21595       -4.68%
+ttwu_count_delta                          561096             560917               -179       -0.03%
+cpu_migrations                              5203              15466              10263     +197.25%
+context_switches                          561180             563445               2265       +0.40%
+cache-misses                              372270             369240              -3030       -0.81%
+cache_misses_per_kinstr                    0.001              0.001           0.000000       +0.00%
+cycles                              335076489392       335703483045          626993653       +0.19%
+instructions                        440392365685       439790757509         -601608176       -0.14%
+ipc                                        1.314              1.310          -0.004000       -0.30%
+wl_busy_cpu_changed_permille                   7                 29                 22     +314.29%
+wl_busy_missed_periods                         1                  2                  1     +100.00%
+wl_busy_on_waker_cpu_permille                166                253                 87      +52.41%
+wl_busy_rounds                             19999              19996                 -3       -0.02%
+wl_busy_wake_lat_max_ns                  1953806            2820545             866739      +44.36%
+wl_busy_wake_lat_mean_ns                   15365              28495              13130      +85.45%
+wl_busy_wake_lat_p90_ns                    32750              55000              22250      +67.94%
+wl_busy_wake_lat_p999_ns                   48500             101000              52500     +108.25%
+wl_busy_wakes                             239988             239952                -36       -0.02%
+wl_idle_cpu_changed_permille                  11                  0                -11     -100.00%
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 75                 78                  3       +4.00%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   781236             182783            -598453      -76.60%
+wl_idle_wake_lat_mean_ns                   35142              39812               4670      +13.29%
+wl_idle_wake_lat_p90_ns                    76750              63500             -13250      -17.26%
+wl_idle_wake_lat_p999_ns                   97000             140750              43750      +45.10%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-llc-idle
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.053             10.058           0.005000       +0.05%
+rq_latency_ns (schedstat)               3587               3711                124       +3.46%
+ttwu_remote_delta                      80007              79206               -801       -1.00%
+ttwu_count_delta                       95652              94963               -689       -0.72%
+cpu_migrations                          1767               1490               -277      -15.68%
+context_switches                       79219              78692               -527       -0.67%
+cache-misses                       247133483          244401173           -2732310       -1.11%
+cache_misses_per_kinstr                0.955              0.940          -0.015000       -1.57%
+cycles                          158239260931       158674698434          435437503       +0.28%
+instructions                    258846016921       259930094744         1084077823       +0.42%
+ipc                                    1.636              1.638           0.002000       +0.12%
+
+pass/fail note (judge by hand, across repeated runs): Lower wake-to-run latency and fewer remote wakeups under multi-core idle search
+No verdict is computed. One run per side is not enough to claim a win.
+=================== S3 vs P3 (20261005T032954+0000-task1 -> 20261005T033428+0000-task1)
+before: runs/20261005T032954+0000-task1
+after:  runs/20261005T033428+0000-task1
+delta = after - before
+task 1: per-LLC idle bitmap
+measures: Wake-to-run latency and idle-search cost under multi-core wakes
+workloads: wake_llc general
+primary metrics: wl_idle_wake_lat_p50_ns wl_idle_wake_lat_p99_ns wl_busy_wake_lat_p50_ns wl_busy_wake_lat_p99_ns rq_latency_ns ttwu_remote_delta ttwu_count_delta cpu_migrations context_switches cache_misses cache_misses_per_kinstr cycles instructions ipc
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-llc-idle
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.085             20.087           0.002000       +0.01%
+wl_idle_wake_lat_p50_ns                    47750              35500             -12250      -25.65%
+wl_idle_wake_lat_p99_ns                    63750             129750              66000     +103.53%
+wl_busy_wake_lat_p50_ns                    14250              28500              14250     +100.00%
+wl_busy_wake_lat_p99_ns                    46500              89500              43000      +92.47%
+rq_latency_ns (schedstat)                   5254              13902               8648     +164.60%
+ttwu_remote_delta                         460099             469233               9134       +1.99%
+ttwu_count_delta                          560969             562220               1251       +0.22%
+cpu_migrations                             13638             108338              94700     +694.38%
+context_switches                          561083             569016               7933       +1.41%
+cache-misses                              368629             482989             114360      +31.02%
+cache_misses_per_kinstr                    0.001              0.001           0.000000       +0.00%
+cycles                              335300332876       320096062819       -15204270057       -4.53%
+instructions                        434824526840       343970396935       -90854129905      -20.89%
+ipc                                        1.297              1.075          -0.222000      -17.12%
+wl_busy_cpu_changed_permille                  37                 83                 46     +124.32%
+wl_busy_missed_periods                         2                  3                  1      +50.00%
+wl_busy_on_waker_cpu_permille                168                183                 15       +8.93%
+wl_busy_rounds                             19997              19996                 -1       -0.01%
+wl_busy_wake_lat_max_ns                  2673321            2625062             -48259       -1.81%
+wl_busy_wake_lat_mean_ns                   15486              30931              15445      +99.74%
+wl_busy_wake_lat_p90_ns                    31000              58000              27000      +87.10%
+wl_busy_wake_lat_p999_ns                   61250             119750              58500      +95.51%
+wl_busy_wakes                             239964             239952                -12       -0.01%
+wl_idle_cpu_changed_permille                   0                298                298          n/a
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 78                 26                -52      -66.67%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   198285             452154             253869     +128.03%
+wl_idle_wake_lat_mean_ns                   33317              51632              18315      +54.97%
+wl_idle_wake_lat_p90_ns                    56750             101250              44500      +78.41%
+wl_idle_wake_lat_p999_ns                   78250             148250              70000      +89.46%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-llc-idle
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.052             10.060           0.008000       +0.08%
+rq_latency_ns (schedstat)               3643               3592                -51       -1.40%
+ttwu_remote_delta                      77761              79592               1831       +2.35%
+ttwu_count_delta                       93215              95454               2239       +2.40%
+cpu_migrations                          1999               1703               -296      -14.81%
+context_switches                       77272              78803               1531       +1.98%
+cache-misses                       248021520          256857447            8835927       +3.56%
+cache_misses_per_kinstr                0.959              0.996           0.037000       +3.86%
+cycles                          158162508594       158470013050          307504456       +0.19%
+instructions                    258721945914       257762390082         -959555832       -0.37%
+ipc                                    1.636              1.627          -0.009000       -0.55%
+
+pass/fail note (judge by hand, across repeated runs): Lower wake-to-run latency and fewer remote wakeups under multi-core idle search
+No verdict is computed. One run per side is not enough to claim a win.
+=================== S2 vs S3 (20261005T032918+0000-task1 -> 20261005T032954+0000-task1)
+before: runs/20261005T032918+0000-task1
+after:  runs/20261005T032954+0000-task1
+delta = after - before
+task 1: per-LLC idle bitmap
+measures: Wake-to-run latency and idle-search cost under multi-core wakes
+workloads: wake_llc general
+primary metrics: wl_idle_wake_lat_p50_ns wl_idle_wake_lat_p99_ns wl_busy_wake_lat_p50_ns wl_busy_wake_lat_p99_ns rq_latency_ns ttwu_remote_delta ttwu_count_delta cpu_migrations context_switches cache_misses cache_misses_per_kinstr cycles instructions ipc
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.087             20.085          -0.002000       -0.01%
+wl_idle_wake_lat_p50_ns                    49250              47750              -1500       -3.05%
+wl_idle_wake_lat_p99_ns                    86500              63750             -22750      -26.30%
+wl_busy_wake_lat_p50_ns                    14250              14250                  0       +0.00%
+wl_busy_wake_lat_p99_ns                    39750              46500               6750      +16.98%
+rq_latency_ns (schedstat)                   5241               5254                 13       +0.25%
+ttwu_remote_delta                         461420             460099              -1321       -0.29%
+ttwu_count_delta                          561096             560969               -127       -0.02%
+cpu_migrations                              5203              13638               8435     +162.12%
+context_switches                          561180             561083                -97       -0.02%
+cache-misses                              372270             368629              -3641       -0.98%
+cache_misses_per_kinstr                    0.001              0.001           0.000000       +0.00%
+cycles                              335076489392       335300332876          223843484       +0.07%
+instructions                        440392365685       434824526840        -5567838845       -1.26%
+ipc                                        1.314              1.297          -0.017000       -1.29%
+wl_busy_cpu_changed_permille                   7                 37                 30     +428.57%
+wl_busy_missed_periods                         1                  2                  1     +100.00%
+wl_busy_on_waker_cpu_permille                166                168                  2       +1.20%
+wl_busy_rounds                             19999              19997                 -2       -0.01%
+wl_busy_wake_lat_max_ns                  1953806            2673321             719515      +36.83%
+wl_busy_wake_lat_mean_ns                   15365              15486                121       +0.79%
+wl_busy_wake_lat_p90_ns                    32750              31000              -1750       -5.34%
+wl_busy_wake_lat_p999_ns                   48500              61250              12750      +26.29%
+wl_busy_wakes                             239988             239964                -24       -0.01%
+wl_idle_cpu_changed_permille                  11                  0                -11     -100.00%
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 75                 78                  3       +4.00%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   781236             198285            -582951      -74.62%
+wl_idle_wake_lat_mean_ns                   35142              33317              -1825       -5.19%
+wl_idle_wake_lat_p90_ns                    76750              56750             -20000      -26.06%
+wl_idle_wake_lat_p999_ns                   97000              78250             -18750      -19.33%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.053             10.052          -0.001000       -0.01%
+rq_latency_ns (schedstat)               3587               3643                 56       +1.56%
+ttwu_remote_delta                      80007              77761              -2246       -2.81%
+ttwu_count_delta                       95652              93215              -2437       -2.55%
+cpu_migrations                          1767               1999                232      +13.13%
+context_switches                       79219              77272              -1947       -2.46%
+cache-misses                       247133483          248021520             888037       +0.36%
+cache_misses_per_kinstr                0.955              0.959           0.004000       +0.42%
+cycles                          158239260931       158162508594          -76752337       -0.05%
+instructions                    258846016921       258721945914         -124071007       -0.05%
+ipc                                    1.636              1.636           0.000000       +0.00%
+
+pass/fail note (judge by hand, across repeated runs): Lower wake-to-run latency and fewer remote wakeups under multi-core idle search
+No verdict is computed. One run per side is not enough to claim a win.
+=================== S1 vs S2 (20261005T032835+0000-task1 -> 20261005T032918+0000-task1)
+before: runs/20261005T032835+0000-task1
+after:  runs/20261005T032918+0000-task1
+delta = after - before
+task 1: per-LLC idle bitmap
+measures: Wake-to-run latency and idle-search cost under multi-core wakes
+workloads: wake_llc general
+primary metrics: wl_idle_wake_lat_p50_ns wl_idle_wake_lat_p99_ns wl_busy_wake_lat_p50_ns wl_busy_wake_lat_p99_ns rq_latency_ns ttwu_remote_delta ttwu_count_delta cpu_migrations context_switches cache_misses cache_misses_per_kinstr cycles instructions ipc
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.103             20.087          -0.016000       -0.08%
+wl_idle_wake_lat_p50_ns                    49500              49250               -250       -0.51%
+wl_idle_wake_lat_p99_ns                    65750              86500              20750      +31.56%
+wl_busy_wake_lat_p50_ns                    14750              14250               -500       -3.39%
+wl_busy_wake_lat_p99_ns                    41250              39750              -1500       -3.64%
+rq_latency_ns (schedstat)                   4934               5241                307       +6.22%
+ttwu_remote_delta                         454965             461420               6455       +1.42%
+ttwu_count_delta                          563016             561096              -1920       -0.34%
+cpu_migrations                              6192               5203               -989      -15.97%
+context_switches                          566956             561180              -5776       -1.02%
+cache-misses                              420381             372270             -48111      -11.44%
+cache_misses_per_kinstr                    0.001              0.001           0.000000       +0.00%
+cycles                              329476792090       335076489392         5599697302       +1.70%
+instructions                        431748234927       440392365685         8644130758       +2.00%
+ipc                                        1.310              1.314           0.004000       +0.31%
+wl_busy_cpu_changed_permille                  13                  7                 -6      -46.15%
+wl_busy_missed_periods                         1                  1                  0       +0.00%
+wl_busy_on_waker_cpu_permille                165                166                  1       +0.61%
+wl_busy_rounds                             19998              19999                  1       +0.01%
+wl_busy_wake_lat_max_ns                  2660186            1953806            -706380      -26.55%
+wl_busy_wake_lat_mean_ns                   15152              15365                213       +1.41%
+wl_busy_wake_lat_p90_ns                    27750              32750               5000      +18.02%
+wl_busy_wake_lat_p999_ns                   59000              48500             -10500      -17.80%
+wl_busy_wakes                             239976             239988                 12       +0.01%
+wl_idle_cpu_changed_permille                   0                 11                 11          n/a
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 79                 75                 -4       -5.06%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   227906             781236             553330     +242.79%
+wl_idle_wake_lat_mean_ns                   34594              35142                548       +1.58%
+wl_idle_wake_lat_p90_ns                    58750              76750              18000      +30.64%
+wl_idle_wake_lat_p999_ns                   80000              97000              17000      +21.25%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.078             10.053          -0.025000       -0.25%
+rq_latency_ns (schedstat)               3802               3587               -215       -5.65%
+ttwu_remote_delta                      77488              80007               2519       +3.25%
+ttwu_count_delta                       93512              95652               2140       +2.29%
+cpu_migrations                          1867               1767               -100       -5.36%
+context_switches                       76657              79219               2562       +3.34%
+cache-misses                       255503703          247133483           -8370220       -3.28%
+cache_misses_per_kinstr                1.011              0.955          -0.056000       -5.54%
+cycles                          156919455885       158239260931         1319805046       +0.84%
+instructions                    252691118504       258846016921         6154898417       +2.44%
+ipc                                    1.610              1.636           0.026000       +1.61%
+
+pass/fail note (judge by hand, across repeated runs): Lower wake-to-run latency and fewer remote wakeups under multi-core idle search
+No verdict is computed. One run per side is not enough to claim a win.
+=================== S1 vs S3 (20261005T032835+0000-task1 -> 20261005T032954+0000-task1)
+before: runs/20261005T032835+0000-task1
+after:  runs/20261005T032954+0000-task1
+delta = after - before
+task 1: per-LLC idle bitmap
+measures: Wake-to-run latency and idle-search cost under multi-core wakes
+workloads: wake_llc general
+primary metrics: wl_idle_wake_lat_p50_ns wl_idle_wake_lat_p99_ns wl_busy_wake_lat_p50_ns wl_busy_wake_lat_p99_ns rq_latency_ns ttwu_remote_delta ttwu_count_delta cpu_migrations context_switches cache_misses cache_misses_per_kinstr cycles instructions ipc
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.103             20.085          -0.018000       -0.09%
+wl_idle_wake_lat_p50_ns                    49500              47750              -1750       -3.54%
+wl_idle_wake_lat_p99_ns                    65750              63750              -2000       -3.04%
+wl_busy_wake_lat_p50_ns                    14750              14250               -500       -3.39%
+wl_busy_wake_lat_p99_ns                    41250              46500               5250      +12.73%
+rq_latency_ns (schedstat)                   4934               5254                320       +6.49%
+ttwu_remote_delta                         454965             460099               5134       +1.13%
+ttwu_count_delta                          563016             560969              -2047       -0.36%
+cpu_migrations                              6192              13638               7446     +120.25%
+context_switches                          566956             561083              -5873       -1.04%
+cache-misses                              420381             368629             -51752      -12.31%
+cache_misses_per_kinstr                    0.001              0.001           0.000000       +0.00%
+cycles                              329476792090       335300332876         5823540786       +1.77%
+instructions                        431748234927       434824526840         3076291913       +0.71%
+ipc                                        1.310              1.297          -0.013000       -0.99%
+wl_busy_cpu_changed_permille                  13                 37                 24     +184.62%
+wl_busy_missed_periods                         1                  2                  1     +100.00%
+wl_busy_on_waker_cpu_permille                165                168                  3       +1.82%
+wl_busy_rounds                             19998              19997                 -1       -0.01%
+wl_busy_wake_lat_max_ns                  2660186            2673321              13135       +0.49%
+wl_busy_wake_lat_mean_ns                   15152              15486                334       +2.20%
+wl_busy_wake_lat_p90_ns                    27750              31000               3250      +11.71%
+wl_busy_wake_lat_p999_ns                   59000              61250               2250       +3.81%
+wl_busy_wakes                             239976             239964                -12       -0.01%
+wl_idle_cpu_changed_permille                   0                  0                  0          n/a
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 79                 78                 -1       -1.27%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   227906             198285             -29621      -13.00%
+wl_idle_wake_lat_mean_ns                   34594              33317              -1277       -3.69%
+wl_idle_wake_lat_p90_ns                    58750              56750              -2000       -3.40%
+wl_idle_wake_lat_p999_ns                   80000              78250              -1750       -2.19%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.078             10.052          -0.026000       -0.26%
+rq_latency_ns (schedstat)               3802               3643               -159       -4.18%
+ttwu_remote_delta                      77488              77761                273       +0.35%
+ttwu_count_delta                       93512              93215               -297       -0.32%
+cpu_migrations                          1867               1999                132       +7.07%
+context_switches                       76657              77272                615       +0.80%
+cache-misses                       255503703          248021520           -7482183       -2.93%
+cache_misses_per_kinstr                1.011              0.959          -0.052000       -5.14%
+cycles                          156919455885       158162508594         1243052709       +0.79%
+instructions                    252691118504       258721945914         6030827410       +2.39%
+ipc                                    1.610              1.636           0.026000       +1.61%
+
+pass/fail note (judge by hand, across repeated runs): Lower wake-to-run latency and fewer remote wakeups under multi-core idle search
+No verdict is computed. One run per side is not enough to claim a win.

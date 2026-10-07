@@ -1,0 +1,45 @@
+Task 7 survey prep (NOT measured yet) — reclaim/compaction off allocating path
+==============================================================================
+Date: Tue Oct 6 2026 ~09:02 PT
+Boot at survey: 7.2.9-t9 (after Task 6 delivery)
+Baseline tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (not modified)
+
+Roadmap
+  "Take direct reclaim and direct compaction off the allocating task."
+  Impact: High. Risk: good for latency, dangerous for OOM / memory stability.
+  Do NOT remove the direct path. Only stop using it on latency-sensitive
+  faults; test OOM and memory-pressure workloads.
+  Better: fail fast to order-0; let kswapd/kcompactd keep higher orders warm.
+  __GFP_NORETRY already used for some THP allocations.
+
+What exists (baseline mm/page_alloc.c)
+  __alloc_pages_slowpath(): can_direct_reclaim = gfp & __GFP_DIRECT_RECLAIM;
+    can_compact = can_direct_reclaim && gfp_compaction_allowed().
+  Calls wake_all_kswapds, __alloc_pages_direct_reclaim, try_to_compact_pages,
+  should_compact_retry. __GFP_NORETRY limits retry rounds.
+  kswapd / kcompactd already exist as background paths.
+  vm.compaction_proactiveness=20 (stock).
+
+Measurability on this box RIGHT NOW
+  31 GiB RAM, ~30 GiB available, swap idle.
+  compact_stall=0, pgscan_direct=0, pgsteal_direct=0 — idle machine shows
+  ZERO direct reclaim/compaction. A Task 7 delta is NOT measurable without
+  an intentional memory-pressure / fragmentation workload (fill RAM, punch
+  holes or fragment freelists, then allocate order-0 / THP under pressure
+  while watching compact_stall_delta, alloc latency, OOM behavior).
+
+Risk gate (must honor before any patch)
+  - Keep direct reclaim available; gate any "skip direct on fault" behind
+    a sysctl default OFF.
+  - Validate under real pressure + OOM scenarios; do not claim wins from
+    the idle compact_stall=0 baseline.
+  - tasks.conf Task 7 still points at database+general — needs a targeted
+    pressure workload before honest before/after.
+
+Next steps when starting Task 7 for real
+  1. Add pressure workload (e.g. mmap+touch ~90% RAM, munmap stripes to
+     fragment, then timed alloc/fault hammer; record compact_stall /
+     pgscan_direct / wall).
+  2. Survey safe hook points (GFP flags on fault alloc, THP __GFP_NORETRY
+     expansion) — prototype behind sysctl=0.
+  3. Only then build 7.2.9-t7 if a gated change is justified.

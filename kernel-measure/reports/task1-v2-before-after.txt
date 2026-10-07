@@ -1,0 +1,102 @@
+Task 1 v2 (per-LLC idle bitmap, lazy clear + wrap search) - stock vs v1 vs v2
+=============================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, governor=powersave)
+Measured v2: Mon Oct 5 2026, 02:27-02:28 PT (America/Phoenix) = 09:27-09:28 UTC
+Harness: /home/kernelmaster/kernel-measure, flags: --task 1 --schedstats
+Workloads: wake_llc = build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20
+           general  = stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief
+Every run finished with status=ok. RAID mdcheck was finished before these runs.
+
+Kernels (uname -r / meta/uname)
+  stock : 7.2.9-baseline
+  v1    : 7.2.9-llc-idle   (0001-per-llc-idle-bitmap.patch; set+clear on enter/exit idle)
+  v2    : 7.2.9-t1v2       (0001-per-llc-idle-bitmap-v2.patch; test-before-write,
+                            lazy clear by waker, snapshot+for_each_cpu_wrap from target)
+
+What changed in v2 vs v1
+  - llc_idle_enter() only writes the shared bit when it is clear (no write on bounce).
+  - Bits are NOT cleared on leaving idle; a waker clears a stale bit after
+    __select_idle_cpu() rejects the candidate.
+  - select_idle_cpu_bitmap() ANDs LLC span & cpus_ptr & idle_cpus once, then
+    walks with for_each_cpu_wrap starting at @target (cluster first when present).
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261005T032835+0000-task1
+  stock S2  20261005T032918+0000-task1
+  stock S3  20261005T032954+0000-task1
+  v1    P1  20261005T033314+0000-task1
+  v1    P2  20261005T033351+0000-task1
+  v1    P3  20261005T033428+0000-task1
+  v2    V1  20261005T092710+0000-task1
+  v2    V2  20261005T092742+0000-task1
+  v2    V3  20261005T092814+0000-task1
+  compare.sh: runs/compare-task1-v2/{S1-vs-V1,S2-vs-V2,S3-vs-V3,P1-vs-V1}.txt
+
+How to read this
+  Noise = stock-vs-stock spread: (max-min)/mean over S1..S3.
+  A delta vs stock counts only if it is bigger than that noise AND points the
+  same way in all three pairs (S1/V1, S2/V2, S3/V3).
+
+wake_llc                         stock S1/S2/S3             v1 P1/P2/P3               v2 V1/V2/V3
+  idle wake p50 (ns)             49500 / 49250 / 47750      19750 / 52250 / 35500      27750 / 38500 / 19000
+  idle wake p99 (ns)             65750 / 86500 / 63750      85000 / 69250 / 129750     159250 / 138250 / 86250
+  busy wake p50 (ns)             14750 / 14250 / 14250      19500 / 25000 / 28500      14250 / 19750 / 14500
+  busy wake p99 (ns)             41250 / 39750 / 46500      66250 / 92000 / 89500      41500 / 78500 / 43000
+  rq_latency_ns                   4934 /  5241 /  5254       8777 / 11294 / 13902       7343 / 12495 /  7776
+  ttwu_remote_delta             454965 /461420 /460099     458452 /439825 /469233     468950 /467773 /464669
+  ttwu_count_delta              563016 /561096 /560969     561842 /560917 /562220     563813 /561583 /561751
+  cpu_migrations                  6192 /  5203 / 13638      63949 / 15466 /108338      43981 / 72930 / 39070
+  cycles (x1e9)                  329.5 / 335.1 / 335.3      335.5 / 335.7 / 320.1      340.2 / 325.0 / 335.3
+  instructions (x1e9)            431.7 / 440.4 / 434.8      396.1 / 439.8 / 344.0      445.8 / 428.7 / 440.8
+  ipc                            1.310 / 1.314 / 1.297      1.181 / 1.310 / 1.075      1.311 / 1.319 / 1.315
+  cache_misses                  420381 /372270 /368629     394248 /369240 /482989     477513 /449848 /544470
+  wl_idle_cpu_changed_permille       0 /    11 /     0        147 /     0 /   298        135 /   233 /   127
+
+v2 vs stock pair deltas (V-S) / stock noise
+  idle p50     -43.9 / -21.8 / -60.2 %    noise 3.6%     better all 3 (but absolute swing is large)
+  idle p99    +142.2 / +59.8 / +35.3 %    noise 31.6%    worse all 3, past noise
+  busy p50      -3.4 / +38.6 /  +1.8 %    noise 3.5%     mixed; NOT consistent
+  busy p99      +0.6 / +97.5 /  -7.5 %    noise 15.9%    mixed; NOT consistent
+  rq_latency   +48.8 /+138.4 / +48.0 %    noise 6.2%     worse all 3; real regression
+  ttwu_remote   +3.1 /  +1.4 /  +1.0 %    noise 1.4%     slightly up; marginal
+  migrations  +610 / +1302 / +186 %       noise ~100%    still much higher
+  cycles        +3.3 /  -3.0 /  0.0 %     noise 1.7%     mixed / flat
+  ipc           +0.1 /  +0.4 /  +1.4 %    noise 1.3%     flat
+
+general (v2 vs stock): everything inside noise (rq_latency, cycles, ipc, cache misses,
+ttwu_remote). cpu_migrations 2014 / 1730 / 2146 vs stock 1867 / 1767 / 1999 — flat.
+
+v2 vs v1 (same workload, qualitative)
+  Busy wake p50/p99 recovered a lot toward stock on V1 and V3 (14250/41500 and
+  14500/43000 vs v1's 19500-28500 / 66250-92000). V2 is still a bad outlier
+  (19750 / 78500). rq_latency is still bad on all three, though the mean is a bit
+  lower than v1 (9.2 µs vs 11.3 µs). IPC no longer collapses the way v1's P1/P3 did.
+  Migrations remain elevated vs stock on both patched kernels.
+  Idle-target CPU changes stay high on v2 (135 / 233 / 127 permille), so wrap
+  search still scatters wakees more than stock.
+
+Verdict: STILL NOT A WIN vs stock. Task 1 v2 FAILS this measurement.
+  - The busy-wake regression that killed v1 is mostly gone on 2 of 3 runs, but
+    pair signs are mixed, so it is not a claimed win either.
+  - rq_latency_ns is still a clear regression on all 3 pairs (+48..+138% against
+    ~6% stock noise). That alone is enough to fail the task.
+  - Idle p50 looks better on all 3 pairs, but idle p99 is worse on all 3 and the
+    idle numbers swing hard run to run. Not a clean result.
+  - Migrations and idle CPU-target changes stay much higher than stock.
+  - general is flat (no harm, no help).
+
+Recommendation
+  Do not ship Task 1 in this form. Options:
+  1. Drop Task 1 and move on to Task 2 (migration policy), keeping stock idle search.
+  2. One more redesign: keep the bitmap as a hint only for the first candidate
+     (or a short fixed-size peek) and never replace the capped linear walk; or
+     make the bitmap per-CPU / local so the waker does not bounce a shared line.
+  3. Accept Task 1 as failed on this box (single LLC, 12 CPUs) and defer until a
+     multi-LLC machine can show a real SIS win.
+
+Caveats
+  - Stock and v1 numbers are from the earlier same-night session (~20:28-20:35 PT).
+    v2 is from a later boot (~02:27 PT). Same harness, same box, powersave governor.
+  - 3 runs per side. Final state: booted 7.2.9-t1v2, GRUB_DEFAULT points at it.
+  - Patch on disk: /workspace/kernel-measure/patches/0001-per-llc-idle-bitmap-v2.patch
+    and /home/kernelmaster/kernel-build/0001-per-llc-idle-bitmap-v2.patch

@@ -1,0 +1,48 @@
+Task 6 survey — anonymous write-fault zeroing / mTHP / anon PUD
+================================================================
+Date: Tue Oct 6 2026 (PT)
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, 12 CPUs, 31 GiB, 1 socket / 1 NUMA / 1×12 MiB L3)
+Trees: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (read-only survey; not modified)
+
+Roadmap ask
+  "Amortize anonymous write-fault zeroing; anonymous PUD is still missing."
+  Impact: High. Workload: general purpose, virtualization.
+  What exists: do_anonymous_page installs the shared zero page for reads;
+  writes call alloc_anon_folio and zero on the fault. Multi-size THP below
+  PMD is installed as PTEs (set_pte_range), not one TLB entry, unless PMD.
+  __handle_mm_fault / create_huge_pud: anonymous PUD unimplemented.
+  Better mechanism: PMD THP amortizes zeroing. A true 1 GiB anon page would
+  be new work. Zero cannot be skipped — move it off the fault or spread it
+  over a bigger page.
+
+What the 7.2.9 tree already has
+  CONFIG_TRANSPARENT_HUGEPAGE=y (MADVISE default).
+  CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD=y (file/DAX PUD only; anon falls back).
+  create_huge_pud(): "No support for anonymous transparent PUD pages yet"
+    → returns VM_FAULT_FALLBACK for vma_is_anonymous().
+  do_huge_pmd_anonymous_page() / __do_huge_pmd_anonymous_page(): live PMD path.
+  alloc_anon_folio(): multi-size THP orders below PMD via thp_vma_allowable_orders;
+    folio_zero_user() when user_alloc_needs_zeroing().
+  Sysfs (booted 7.2.9-t9 / same config family):
+    enabled: always [madvise] never
+    hugepages-2048kB enabled: always [inherit] madvise never   ← PMD inherits
+    hugepages-{8,16,32,64,128,256,512,1024}kB: mostly [never] for anon
+    (8kB has shmem only). mTHP mid-sizes exist but default OFF for anon.
+
+Hardware limits
+  Single socket / single NUMA / single L3 — no multi-node THP interaction.
+  perf TLB-miss events historically missing on this CPU — rely on wall_ns,
+  minor faults (getrusage), /proc/vmstat thp_*, and per-size mTHP stats.
+
+Safe path chosen (no kernel patch)
+  Policy / application path already in-tree:
+    - MADV_NOHUGEPAGE → order-0 write faults (control)
+    - MADV_HUGEPAGE under stock madvise → PMD 2 MiB amortizes fault+zero trips
+  Optional A/B: enable mid-size mTHP (64k..1M always) via sysfs for a run.
+  NOT attempted: implementing anonymous PUD (1 GiB). That is large new MM
+  work (fault, zap, split, migration, uffd, reclaim) — out of scope for a
+  safe Task 6 delta. Documented as still missing.
+
+Harness
+  New workload anon_fault (C) + tasks.conf Task 6 → anon_fault.
+  Primary metrics: wl_hugeprefer_vs_nohuge_fault_ns_ratio, fault_ns, minflt.

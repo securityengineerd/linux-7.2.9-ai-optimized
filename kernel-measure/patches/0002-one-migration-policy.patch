@@ -1,0 +1,134 @@
+sched/fair: one migration policy for cache-aware load balance
+
+When CONFIG_SCHED_CACHE is on, load balance and preferred-LLC
+placement must not cancel each other. Keep one policy: cache/NUMA
+locality wins over avg_load until nr_balance_failed passes
+cache_nice_tries.
+
+- get_pref_llc: publish preferred LLC only when it sits on
+  numa_preferred_nid (NUMA constrains LLC; do not clear an on-node
+  preference and let avg_load yank the task).
+- can_migrate_llc_task: ignore an off-node process LLC so NUMA and
+  cache-aware placement do not pin against each other.
+- migrate_degrades_llc: refuse migrate_load pulls off preferred LLC
+  until the existing failure threshold.
+
+Does not replace pick_eevdf, remove the load balancer, or add a
+scheduler class. Not compile-tested; no full kernel build run.
+
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1727,14 +1727,15 @@
+ 
+ #ifdef CONFIG_NUMA_BALANCING
+ 		/*
+-		 * Don't assign preferred LLC if it
+-		 * conflicts with NUMA balancing.
+-		 * This can happen when sched_setnuma() gets
+-		 * called, however it is not much of an issue
+-		 * because we expect account_mm_sched() to get
+-		 * called fairly regularly -- at a higher rate
+-		 * than sched_setnuma() at least -- and thus the
+-		 * conflict only exists for a short period of time.
++		 * One migration policy: cache/NUMA locality wins over
++		 * avg_load until nr_balance_failed passes cache_nice_tries.
++		 *
++		 * Keep NUMA as a constraint on LLC preference: publish a
++		 * preferred LLC only when it sits on numa_preferred_nid.
++		 * Clearing an on-node preference (or clearing and then
++		 * letting load balance yank for avg_load) lets the two
++		 * placers cancel; migrate_degrades_llc holds on-node LLC
++		 * locality against avg_load until the failure threshold.
+ 		 */
+ 		if (static_branch_likely(&sched_numa_balancing) &&
+ 		    p->numa_preferred_nid >= 0 &&
+@@ -10798,6 +10799,18 @@
+ 	if (cpu < 0 || cpus_share_cache(src_cpu, dst_cpu))
+ 		return mig_unrestricted;
+ 
++#ifdef CONFIG_NUMA_BALANCING
++	/*
++	 * Keep LLC preference only when it is on this task's preferred
++	 * NUMA node. An off-node process LLC must not pin the task so
++	 * NUMA and cache-aware placement cancel, then avg_load yanks.
++	 */
++	if (static_branch_likely(&sched_numa_balancing) &&
++	    p->numa_preferred_nid >= 0 &&
++	    cpu_to_node(cpu) != p->numa_preferred_nid)
++		return mig_unrestricted;
++#endif
++
+ 	/* skip cache aware load balance for too many threads */
+ 	if (invalid_llc_nr(mm, p, dst_cpu) ||
+ 	    exceed_llc_capacity(mm, dst_cpu)) {
+@@ -10864,9 +10877,15 @@
+ /*
+  * Check if migrating task p from env->src_cpu to
+  * env->dst_cpu breaks LLC localiy.
++ *
++ * One migration policy: cache/NUMA locality wins over avg_load
++ * until nr_balance_failed passes cache_nice_tries. NUMA is checked
++ * first in can_migrate_task() via migrate_degrades_locality().
+  */
+ static bool migrate_degrades_llc(struct task_struct *p, struct lb_env *env)
+ {
++	int pref;
++
+ 	if (!sched_cache_enabled())
+ 		return false;
+ 
+@@ -10874,8 +10893,8 @@
+ 		return false;
+ 	/*
+ 	 * Skip over tasks that would degrade LLC locality;
+-	 * only when nr_balanced_failed is sufficiently high do we
+-	 * ignore this constraint.
++	 * only when nr_balance_failed is past cache_nice_tries
++	 * do we ignore this constraint and allow avg_load pulls.
+ 	 *
+ 	 * Threshold of cache_nice_tries is set to 1 higher
+ 	 * than nr_balance_failed to avoid excessive task
+@@ -10884,13 +10903,27 @@
+ 	if (env->sd->nr_balance_failed >= env->sd->cache_nice_tries + 1)
+ 		return false;
+ 
++	pref = READ_ONCE(p->preferred_llc);
++
+ 	/*
+ 	 * We know the env->src_cpu has some tasks prefer to
+ 	 * run on env->dst_cpu, skip the tasks do not prefer
+ 	 * env->dst_cpu, and find the one that prefers.
+ 	 */
+ 	if (env->migration_type == migrate_llc_task &&
+-	    READ_ONCE(p->preferred_llc) != llc_id(env->dst_cpu))
++	    pref != llc_id(env->dst_cpu))
++		return true;
++
++	/*
++	 * Do not pull a task off its preferred LLC just to equalize
++	 * avg_load. can_migrate_llc_task may still allow leaving an
++	 * overloaded preferred LLC for util/task balance; avg_load
++	 * equalization waits for the failure threshold above.
++	 */
++	if (env->migration_type == migrate_load &&
++	    pref >= 0 &&
++	    llc_id(env->src_cpu) == pref &&
++	    llc_id(env->dst_cpu) != pref)
+ 		return true;
+ 
+ 	if (can_migrate_llc_task(env->src_cpu,
+@@ -13060,7 +13093,13 @@
+ 		if (local->avg_load >= busiest->avg_load)
+ 			goto out_balanced;
+ 
+-		/* XXX broken for overlapping NUMA groups */
++		/*
++		 * XXX broken for overlapping NUMA groups.
++		 * With SCHED_CACHE, picking busiest by avg_load must not
++		 * yank a task off its preferred LLC: migrate_degrades_llc
++		 * keeps cache/NUMA locality until nr_balance_failed passes
++		 * cache_nice_tries.
++		 */
+ 		sds.avg_load = (sds.total_load * SCHED_CAPACITY_SCALE) /
+ 				sds.total_capacity;
+ 

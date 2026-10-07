@@ -1,0 +1,92 @@
+Task 2 (one migration policy) - stock vs 7.2.9-ai-opt before/after
+====================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+Patched measured: Mon Oct 5 2026, 05:47-05:48 PT (= 12:47-12:48 UTC)
+Stock measured:   Mon Oct 5 2026, 07:54-07:55 PT (= 14:54-14:55 UTC)
+Harness: /home/kernelmaster/kernel-measure, flags: --task 2 --schedstats
+Workloads: migrate_load = build/migrate_storm -d 18 -w 0 -k 256 -t 10
+           general      = stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief
+Every run status=ok. Task 1 is NOT in this kernel (dropped).
+
+Kernels
+  stock   : 7.2.9-baseline
+  patched : 7.2.9-ai-opt  (0002-one-migration-policy.patch only)
+  CONFIG_SCHED_CACHE=y, CONFIG_NUMA_BALANCING=y on both
+
+What the patch does
+  - get_pref_llc: comment only (logic unchanged in this tree).
+  - can_migrate_llc_task: ignore preferred LLC when it is off numa_preferred_nid.
+  - migrate_degrades_llc: refuse migrate_load pulls off preferred LLC until
+    nr_balance_failed past cache_nice_tries.
+
+Hardware caveat (critical)
+  Workload reports wl_numa_nodes=1 and wl_llc_domains=1 on every run. With a
+  single LLC, llc_id(src)==llc_id(dst) for every on-box migrate, so the new
+  migrate_load / preferred-LLC guard almost never fires. The NUMA half also
+  cannot be proven on one socket. This run is a regression screen, not a proof
+  of the Task 2 design.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261005T145432+0000-task2   (runs/BASELINE-task2 -> this)
+  stock S2  20261005T145503+0000-task2
+  stock S3  20261005T145533+0000-task2
+  patch P1  20261005T124727+0000-task2
+  patch P2  20261005T124758+0000-task2
+  patch P3  20261005T124828+0000-task2
+  compare.sh: runs/compare-task2/{S1-vs-P1,S2-vs-P2,S3-vs-P3,S1-vs-S2}.txt
+
+How to read
+  Noise = stock-vs-stock (max-min)/mean over S1..S3.
+  A delta counts only if bigger than that noise AND same sign on all 3 pairs.
+
+migrate_load                     stock S1 / S2 / S3          patched P1 / P2 / P3
+  free mloads/s                   2354 / 1998 / 1956          1922 / 2025 / 2049
+  storm mloads/s                  2353 / 1926 / 1929          1958 / 2031 / 2054
+  settle mloads/s                 2305 / 2000 / 1944          1976 / 2025 / 2033
+  settle_nr_migrations             193 /  185 /  171           226 /  188 /  198
+  cpu_migrations                  6133 / 6170 / 6190          6345 / 6206 / 6200
+  cache_misses                 1819134 /1437856 /3314013    915775 /1275107 /507562
+  cache_misses_per_kinstr        0.011 / 0.010 / 0.023       0.006 / 0.009 / 0.003
+  cycles (x1e9)                 1023.8 /1024.1 /1021.2      1024.6 /1024.5 /1025.0
+  instructions (x1e9)            172.4 / 146.0 / 143.6       144.3 / 149.7 / 151.1
+  ipc                            0.168 / 0.143 / 0.141       0.141 / 0.146 / 0.147
+  rq_latency_ns (x1e6)           2.035 / 2.084 / 2.013       2.058 / 2.105 / 2.150
+
+Pair deltas (P-S) / stock noise
+  free mloads/s     -18.4 / +1.4 / +4.8 %     noise ~19%   mixed; inside noise
+  storm mloads/s    -16.8 / +5.5 / +6.5 %     noise ~21%   mixed; inside noise
+  settle mloads/s   -14.3 / +1.3 / +4.6 %     noise ~17%   mixed; inside noise
+  settle migrations +17.1 / +1.6 / +15.8 %    noise ~12%   up on 2/3; weak
+  cpu_migrations     +3.5 / +0.6 / +0.2 %     noise ~0.9%  slightly up all 3
+  cache_misses      -49.7 / -11.3 / -84.7 %   noise ~85%   lower all 3; all
+                                                    patched values also below
+                                                    stock's best (1.44M)
+  cache_misses/kinstr -45 / -10 / -87 %       noisy        lower all 3
+  cycles             +0.1 / 0.0 / +0.4 %      ~0.3%        flat
+  ipc               -16.1 / +2.1 / +4.3 %     ~18%         mixed (S1 stock outlier)
+  rq_latency         +1.2 / +1.0 / +6.8 %     ~3.5%        mild up; weak
+
+general: flat on cycles/ipc/cache_misses/rq_latency (inside a few percent).
+
+Verdict: INCONCLUSIVE on this box — not a claimed win, not a clear fail.
+  - Throughput and settle-migration metrics sit inside stock run-to-run noise.
+  - cpu_migrations tick up a little on all three pairs; absolute change is tiny.
+  - cache_misses look better on every pair and sit under stock's best run, but
+    stock alone swings 1.4M-3.3M (~85% noise), and with one LLC the patch's
+    intended guards largely cannot act. Treat the miss drop as interesting but
+    unproven (possible boot/session effect).
+  - NUMA half of Task 2 was never testable here.
+
+Recommendation
+  1. Keep the Task 2 patch in the tree as the candidate for multi-LLC / multi-
+     NUMA hardware; do not treat this host as proof.
+  2. On this box, either park Task 2 as "no decision" and move to the next
+     task that this hardware can stress (e.g. Task 9 lockless io_uring, Task 4
+     TCP, Task 5 buffered-read), or add a synthetic multi-LLC-ish affinity
+     storm that still only proves migration count behavior, not cache wins.
+  3. Leave GRUB on 7.2.9-baseline (current boot) until the next task build;
+     7.2.9-ai-opt stays installed for re-entry.
+
+Caveats
+  - Patched and stock were collected about two hours apart on different boots.
+  - 3 runs per side. migrate_storm reports 1 LLC domain / 1 NUMA node always.

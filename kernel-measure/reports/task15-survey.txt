@@ -1,0 +1,64 @@
+Task 15 survey — hashed folio wait table (folio_wait_table)
+===========================================================
+Host target: kernelmaster@15.204.65.34, tree linux-7.2.9-baseline (read-only).
+Roadmap: "Replace the hashed folio wait table where collisions herd."
+Impact: Medium, only where many unrelated folios block at once.
+Better mechanism named: per-folio wait queue (costs a spinlock on every folio).
+Workload named: Database, storage.
+
+What exists in 7.2.9 (mm/filemap.c)
+  PAGE_WAIT_TABLE_BITS = 8
+  PAGE_WAIT_TABLE_SIZE = 256
+  static wait_queue_head_t folio_wait_table[256] __cacheline_aligned
+  folio_waitqueue(folio) = &folio_wait_table[hash_ptr(folio, 8)]
+
+  Comment in-tree (intentional tradeoff):
+    "By using a hash table of waitqueues where the bucket discipline is to
+     maintain all waiters on the same queue and wake all when any of the
+     pages become available, and for the woken contexts to check to be
+     sure the appropriate page became available, this saves space at a
+     cost of thundering herd phenomena during rare hash collisions."
+
+  Wake path is not a blind wake-all anymore:
+    folio_wake_bit() -> __wake_up_locked_key() with wait_page_key
+    wake_page_function() returns 0 (continue) when !wake_page_match()
+    So unrelated waiters on the same bucket are walked under the bucket
+    spinlock but are NOT woken. Classic thundering-herd false wake is
+    already filtered; remaining collision cost is:
+      (1) shared bucket spinlock contention across unrelated folios
+      (2) walking foreign wait_queue_entry_t under that lock
+      (3) delayed folio_clear_waiters when other pages still share the q
+
+  Wait entry points:
+    folio_wait_bit / folio_wait_bit_killable
+    folio_lock / folio_lock_killable (PG_locked, DROP/SHARED/EXCLUSIVE)
+    folio_wait_writeback (PG_writeback)
+    folio_wait_private_2
+    folio_wait_stable
+
+  Existing knob (NOT a wait-table size knob):
+    vm.page_lock_unfairness (stock 5) — lock-steal fairness only.
+
+  struct folio has no embedded wait_queue_head_t. Folio layout is carefully
+  overlaid with struct page unions; adding a per-folio wait queue means a
+  spinlock + list_head on every folio (roadmap's stated cost), touching
+  allocator size, SLAB/page-flags adjacency, and every folio_wake_bit site.
+
+Risk gate for a per-folio wait-queue patch
+  - Memory: ~24–40 bytes × every cached/anon folio is a large tax for a
+    "rare collision" path the comment already accepts.
+  - Correctness: PG_waiters bit, exclusive handoff (WQ_FLAG_CUSTOM), and
+    lock-steal unfairness are tightly coupled to the hashed design.
+  - No CONFIG / sysctl already selects table bits; changing BITS is a
+    different mechanism than the roadmap's per-folio queue.
+
+Decision lean (pre-measure)
+  Prefer Approach A: measure stock under a collision-stressing workload
+  (folio_wait: many files × fdatasync / sync_file_range / mixed readers).
+  Ship a gated per-folio WQ patch only if measurement shows a clear,
+  same-sign herd win that justifies the folio-size cost. Otherwise leave
+  the hashed table (documented intentional tradeoff) and write the report.
+
+Harness
+  New: workloads/src/folio_wait.c, workloads/folio_wait.sh
+  tasks.conf Task 15 → folio_wait database storage

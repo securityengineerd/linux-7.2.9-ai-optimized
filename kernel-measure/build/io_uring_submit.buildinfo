@@ -1,0 +1,5 @@
+source=/workspace/kernel-measure/workloads/src/io_uring_submit.c
+source_sha256=3b2a2318f00bbcee77f072fa25739f6a6037650ebe34a7d511e8394db625e718
+compiler=cc
+cc (Debian 14.2.0-19) 14.2.0
+built=2026-10-05T20:13:41-0700

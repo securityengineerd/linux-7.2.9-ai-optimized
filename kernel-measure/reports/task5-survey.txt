@@ -1,0 +1,39 @@
+Task 5 survey — buffered-read copy avoidance (linux-7.2.9-baseline)
+====================================================================
+Tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (read-only; not modified)
+Host: kernelmaster@15.204.65.34  Date: Mon Oct 5 2026 PT
+
+filemap_read (mm/filemap.c)
+  Hot buffered path for generic_file_read_iter when !IOCB_DIRECT.
+  Loop: filemap_get_pages -> copy_folio_to_iter(folio, ...) per folio.
+  Every userspace buffered read of an already-cached folio pays a
+  kernel->user copy. That is the cost Task 5 targets.
+
+IOCB_DONTCACHE / dropbehind
+  Marks folios dropbehind during get/readahead; filemap_end_dropbehind_read
+  invalidates after the copy. Useful for cold/streaming (avoid cache
+  pollution). Does NOT skip copy_folio_to_iter on a hot hit. Not a fix
+  for "hot buffered reads off the page-cache copy".
+
+O_DIRECT (generic_file_read_iter + IOCB_DIRECT)
+  Calls mapping->a_ops->direct_IO after kiocb_write_and_wait. Bypasses
+  the page-cache copy into the iterator (DMA into user buffer). App must
+  use aligned buffers/offsets/lengths. Database-style private buffer pools
+  already prefer this to avoid double buffering.
+
+mmap (filemap_map_pages)
+  Fault path maps uptodate folios into the VMA (PTE/PMD) without copying
+  payload into a separate userspace buffer. After fault-in, subsequent
+  loads are pure userspace DRAM access — no syscall, no copy_folio_to_iter.
+
+Roadmap reading
+  "Better mechanism: mmap (filemap_map_pages) or O_DIRECT — application-
+  path change, not a new kernel read syscall."
+  Task 5 pass is demonstrated by measuring the same warm file three ways
+  and showing mmap (and typically O_DIRECT CPU cost) beat buffered pread.
+  No safe kernel patch invents a second buffered-read path that removes
+  the copy while keeping pread semantics; that would be mmap/O_DIRECT.
+
+Decision
+  No kernel patch planned unless measurement reveals a clear hot-path bug.
+  Prefer honest application-path before/after report on 7.2.9-baseline.

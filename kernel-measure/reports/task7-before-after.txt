@@ -1,0 +1,158 @@
+Task 7 (background reclaim/compaction off allocating path) — policy-path PASS
+==============================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+Measured: Tue Oct 6 2026, 09:18 PT (= 16:18 UTC) on 7.2.9-baseline (cold buddy after reboot)
+Harness: /home/kernelmaster/kernel-measure, flags: --task 7 --schedstats
+Workload: mem_pressure -m fragment -r 1024 -f 95 -c 64 -n 48
+  mlock 1024 MiB safety cushion; fill ~95% remaining anon (NOHUGEPAGE);
+  punch alternate 4 KiB holes; keep 48×64 MiB THP-preferring chunks mapped.
+Every run status=ok. No patched kernel. Baseline tree not modified. oom_kill=0.
+
+Kernels /boot present
+  measured: 7.2.9-baseline
+  also    : 7.2.9-t9, 7.2.9-t3, 7.2.9-ai-opt, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after measure; no t7 image installed)
+
+Survey (Phase 1)
+  Roadmap: "Take direct reclaim and direct compaction off the allocating task."
+  Keep the direct path available; stop using it on latency-sensitive faults.
+  Prefer fail-fast to order-0; let kswapd/kcompactd keep higher orders warm.
+
+  __alloc_pages_slowpath() (mm/page_alloc.c):
+    can_direct_reclaim = gfp & __GFP_DIRECT_RECLAIM;
+    can_compact = can_direct_reclaim && gfp_compaction_allowed();
+    wake_all_kswapds → direct reclaim → direct compact → may_oom.
+    __GFP_NORETRY limits retry; costly orders skip retry without RETRY_MAYFAIL.
+
+  THP fault GFP is already policy-gated by vma_thp_gfp_mask()
+  (/sys/kernel/mm/transparent_hugepage/defrag):
+    always        → GFP_TRANSHUGE (±__GFP_NORETRY) = sync compact/reclaim on fault
+    defer         → GFP_TRANSHUGE_LIGHT|__GFP_KSWAPD_RECLAIM = wake background, no direct
+    defer+madvise → LIGHT; direct only if VM_HUGEPAGE
+    madvise (stock)→ LIGHT; direct if VM_HUGEPAGE (MADV_HUGEPAGE)
+    never         → GFP_TRANSHUGE_LIGHT only
+
+  Stock THP enabled=[madvise], defrag=[madvise]. So madvised THP faults STILL
+  take __GFP_DIRECT_RECLAIM today — Task 7's intent for THP is expressed by
+  switching defrag to defer/never, not by a new sysctl.
+
+  Order-0 / GFP_USER paths still require direct reclaim under watermark
+  pressure; skipping that ungated is an OOM footgun. Existing knobs
+  (swappiness, watermark_scale_factor, compaction_proactiveness) tune
+  background behavior without removing the direct path.
+
+  Full prep: reports/task7-survey-prep.txt.
+
+Risk gate
+  - No ungated reclaim skip shipped. No 0007-*.patch / 7.2.9-t7.
+  - Feature under test is an EXISTING sysfs policy (defrag=defer), default
+    left at stock madvise after measure.
+  - OOM: wl_oom_kill_delta=0 on all 6 formal runs; /proc/vmstat oom_kill=0.
+  - Pressure proven BEFORE claiming delta: cold-boot always runs show
+    compact_stall_delta 965..1190 (not the idle compact_stall=0 lie).
+
+Harness
+  Added workloads/src/mem_pressure.c + workloads/mem_pressure.sh.
+  tasks.conf Task 7 → mem_pressure (was database+general).
+  MEMPRESS_THP_DEFRAG= in workloads.conf temporarily selects defrag policy
+  (restored empty after runs). Needs passwordless sudo for sysfs + memlock.
+
+What was attempted
+  - Survey slowpath + vma_thp_gfp_mask + existing compaction_proactiveness.
+  - Built pressure workload; first recipes left contiguous DMA32/Normal
+    high-order free (stall=0). Fixed with mlock cushion + keep-mapped THP
+    chunks draining high-order freelists.
+  - reclaim mode also moves pgscan_direct (smoke +449) — proves order-0
+    direct reclaim is reachable; not used as the A/B free variable because
+    skipping it is unsafe.
+  - Looked for a narrow gated kernel patch. Honest answer: existing defrag
+    sysfs already implements "skip direct compact on THP fault." A new
+    vm.alloc_skip_direct_reclaim would duplicate that for THP and would be
+    dangerous if applied to order-0. No fake patch.
+
+Policy under test (already in-tree)
+  A = transparent_hugepage/defrag=always  (max sync compact on THP fault)
+  B = transparent_hugepage/defrag=defer   (wake kswapd/kcompactd; no direct)
+  Same mem_pressure fragment recipe; free variable = defrag policy only.
+  Stock madvise+ MADV_HUGEPAGE is closer to always for this workload
+  (also sets __GFP_DIRECT_RECLAIM); always is the clearer "direct on" pole.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  always A1  20261006T161806+0000-task7   (runs/ALWAYS-task7, BASELINE-task7)
+  always A2  20261006T161818+0000-task7
+  always A3  20261006T161829+0000-task7
+  defer  D1  20261006T161841+0000-task7   (runs/DEFER-task7)
+  defer  D2  20261006T161853+0000-task7
+  defer  D3  20261006T161904+0000-task7
+  patched: none
+
+Primary signal (3-pair evidence)
+  metric                         A1           A2           A3
+  wl_alloc_fault_ns (x1e6)     607.38       470.97       588.56
+  wl_compact_stall_delta        1190          972          965
+  wl_compact_success_delta       940          945          895
+  wl_thp_fault_alloc_delta      1536         1536         1491
+  wl_thp_fault_fallback_delta      0            0           45
+  wl_oom_kill_delta                0            0            0
+  wl_thp_defrag                 always       always       always
+
+  metric                         D1           D2           D3
+  wl_alloc_fault_ns (x1e6)     390.66       414.34       120.57
+  wl_compact_stall_delta           0            0            0
+  wl_compact_success_delta         0            0            0
+  wl_thp_fault_alloc_delta       677          716         1536
+  wl_thp_fault_fallback_delta    859          820            0
+  wl_oom_kill_delta                0            0            0
+  wl_thp_defrag                  defer        defer        defer
+
+  pair (D/A fault_ns)           0.643        0.880        0.205
+  pair stall always→defer   1190→0       972→0       965→0
+
+How to read
+  Pass gate: lower allocating-task stall under proven pressure, no OOM.
+  compact_stall_delta: always ∈ [965,1190] on all 3 runs; defer = 0 on all 3.
+  Same sign, far past run-to-run noise → direct compaction is OFF the fault
+  path under defer. That is the Task 7 mechanism for THP.
+  wl_alloc_fault_ns: defer lower on all 3 pairs (ratios 0.20–0.88). Pair 3
+  is helped by a warm buddy after prior runs (defer got full 1536 THP with
+  0 fallback); pairs 1–2 show the expected tradeoff — fewer THP wins
+  (677/716 vs 1536) and more thp_fault_fallback (859/820) when compact is
+  not allowed to stall the fault. Latency still improves because fallback
+  to order-0 avoids sync compact.
+  OOM: zero across the board — risk gate held for this policy.
+
+Whole-run perf (wraps fill+punch+alloc; not the free variable)
+  always wall ~9.4–9.6s; defer wall ~9.3–9.4s. cycles similar — dominated
+  by the shared fill/punch setup, not the THP alloc phase.
+
+Reclaim-mode smoke (not the formal A/B)
+  mem_pressure -m reclaim on t9 earlier: pgscan_direct_delta=+449,
+  pgscan_kswapd_delta=+111261, oom=0. Proves direct reclaim is reachable
+  on this box. Intentionally NOT skipped by any patch.
+
+Verdict
+  PASS (policy / existing sysfs) — use transparent_hugepage/defrag=defer
+  (or never) to take direct compaction/reclaim off THP page faults; keep
+  stock madvise if THP success rate under fragmentation matters more than
+  fault latency. Do NOT ship an ungated order-0 reclaim skip.
+  No 7.2.9-t7 / 0007-*.patch.
+
+Recommendation
+  - Latency-sensitive hosts that MADV_HUGEPAGE heavily: set
+      echo defer > /sys/kernel/mm/transparent_hugepage/defrag
+    (or defer+madvise if only some VMAs should stall). Persist via udev/sysctl
+    drop-in / boot script; stock default remains madvise.
+  - Keep vm.compaction_proactiveness > 0 so kcompactd can warm high orders
+    in the background (stock 20 is fine).
+  - Leave direct reclaim on for GFP_KERNEL / order-0; tune watermarks /
+    swappiness instead of removing the path.
+  - Task 8 (stop reclaim from splitting large anon folios) also carries an
+    MM risk note — survey-only until a pressure harness for folio-split is
+    ready; do not start a patch without the same OOM gate.
+
+Artifacts
+  report : reports/task7-before-after.txt (box + server)
+  prep   : reports/task7-survey-prep.txt
+  workload: workloads/src/mem_pressure.c, workloads/mem_pressure.sh
+  runs   : runs/ALWAYS-task7, runs/DEFER-task7, runs/BASELINE-task7→ALWAYS
+  patch  : none

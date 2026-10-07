@@ -1,0 +1,153 @@
+Task 8 (keep large anon folios on reclaim) — policy-path PASS
+==============================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+Measured: Tue Oct 6 2026, 09:32–09:34 PT (= 16:32–16:34 UTC) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 8 --schedstats
+Workload: folio_split -m partial|underused|swapfb -r 1024 -t 1024
+Every formal run status=ok. No patched kernel. Baseline tree not modified. oom_kill=0.
+
+Kernels /boot present
+  measured: 7.2.9-baseline
+  also    : 7.2.9-t9, 7.2.9-t3, 7.2.9-ai-opt, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after measure; no t8 image installed)
+
+Survey (Phase 1)
+  Roadmap: "Stop reclaim from splitting large anonymous folios."
+  Cited mechanism: shrink_folio_list splits when matching swap slot missing;
+  better path = swap_table clusters kept at folio order.
+
+  7.2.9 already implements that better path:
+    CONFIG_THP_SWAP=y
+    mm/swap_table.h per-cluster table (SWAPFILE_CLUSTER = HPAGE_PMD_NR)
+    folio_alloc_swap() at folio_order; order-aware free/nonfull/frag lists
+    shrink_folio_list: try whole-folio swap first; only then
+      split_folio_to_list + THP_SWPOUT_FALLBACK on failure
+    Partially mapped: split immediately (free unmapped pages without IO)
+    try_to_unmap(..., TTU_SYNC | TTU_SPLIT_HUGE_PMD) for large folios
+
+  Existing knobs (not a new sysctl):
+    transparent_hugepage/shrink_underused (stock 1)
+    khugepaged/max_ptes_none (stock 511 = disables thp_underused())
+    THP enabled/defrag, MADV_*, swap size/fragmentation
+
+  Full prep: reports/task8-survey-prep.txt.
+
+Risk gate
+  - No ungated never-split. No 0008-*.patch / 7.2.9-t8.
+  - Splitting partially mapped or swap-fallback folios is required for
+    reclaim progress; refusing that is an OOM footgun.
+  - OOM: wl_oom_kill_delta=0 on all formal runs; /proc/vmstat oom_kill=0.
+  - Split path proven on stock BEFORE any "after" claim (partial 3×).
+
+Harness
+  Added workloads/src/folio_split.c + workloads/folio_split.sh.
+  tasks.conf Task 8 → folio_split (was general+containers).
+  Modes: partial (punch inside THPs), underused (first-page touch),
+         swapfb (fragment swap then reclaim THPs).
+  FOLIOSPLIT_SHRINK_UNDERUSED= optional (restored). Needs sudo for memlock.
+
+What was attempted
+  - Survey vmscan split / folio_alloc_swap / swap_table / deferred_split /
+    shrink_underused (read-only on baseline tree).
+  - Built pressure harness; smoke on t9 then formal on cold baseline.
+  - Looked for a narrow gated kernel change. Honest answer: order-aware
+    THP_SWAP already is the roadmap mechanism. A "never split under reclaim"
+    sysctl would either duplicate existing behavior (when swap order matches)
+    or block reclaim when it does not → fail risk gate. No fake patch.
+
+Policy under test (already in-tree)
+  A = mode=partial  — force partially-mapped THPs (must split to reclaim)
+  B = mode=underused — reclaim fully mapped PMD THPs via swap (keep folio)
+  Free variable = workload shape that selects existing reclaim branches;
+  kernel knobs left at stock (shrink_underused=1, max_ptes_none=511).
+  Extra: one swapfb run proves THP_SWPOUT_FALLBACK+split when clusters
+  are fragmented.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  partial P1  20261006T163256+0000-task8   (runs/PARTIAL-task8, BASELINE-task8)
+  partial P2  20261006T163309+0000-task8
+  partial P3  20261006T163322+0000-task8
+  underused U1 20261006T163342+0000-task8  (runs/UNDERUSED-task8)
+  underused U2 20261006T163355+0000-task8
+  underused U3 20261006T163408+0000-task8
+  swapfb    S1 20261006T163420+0000-task8  (runs/SWAPFB-task8)
+  patched: none
+
+Primary signal — split-path proof on stock (required before any "after")
+  metric                         P1           P2           P3
+  wl_mode                     partial      partial      partial
+  wl_thp_fault_alloc_install    512          512          512
+  wl_thp_split_page_delta       512          512          512
+  wl_thp_deferred_split_page    512          512          512
+  wl_thp_split_pmd_delta        512          512          512
+  wl_thp_swpout_delta             0            0            0
+  wl_thp_swpout_fallback_delta    0            0            0
+  wl_oom_kill_delta               0            0            0
+
+Primary signal — keep-folio on reclaim (roadmap intent already met)
+  metric                         U1           U2           U3
+  wl_mode                    underused    underused    underused
+  wl_thp_fault_alloc_install    512          512          512
+  wl_thp_swpout_delta           510          510          510
+  wl_thp_swpout_fallback_delta    2            2            2
+  wl_thp_split_page_delta         2            2            2
+  wl_thp_deferred_split_page      0            0            0
+  wl_pswpout_delta           261122       261122       261122
+  wl_oom_kill_delta               0            0            0
+
+  pair (U/P split_page)      2/512        2/512        2/512
+  pair (U/P swpout)          510/0        510/0        510/0
+  whole-folio fraction       510/512 ≈ 99.61% on all 3 underused runs
+
+Swap-fallback proof (single formal)
+  swapfb: thp_swpout=+311, thp_swpout_fallback=+201, thp_split_page=+201,
+          oom=0 — same sign as smoke; split fires when high-order swap
+          clusters are unavailable.
+
+How to read
+  Pass gate: prove split path on stock; show existing reclaim already keeps
+  large anon folios whole when folio_alloc_swap(order) succeeds; no OOM;
+  do not ship ungated never-split.
+  Partial: exact 512 splits / 512 deferred / 512 split_pmd on every run —
+  path fires, far past noise, same sign on all 3.
+  Underused: 510/512 whole THP swpouts, only 2 fallbacks/splits on every
+  run — same sign on all 3 pairs vs partial (split↓, swpout↑). That is the
+  in-tree "keep folio at order" behavior the roadmap asked for.
+  shrink_underused A/B with stock max_ptes_none=511 is a no-op
+  (thp_underused short-circuits); with max_ptes_none=64, reclaim still
+  preferred whole swpout over deferred underused split in smoke — further
+  evidence the swap path already expresses the intent.
+
+Verdict
+  PASS (policy / existing in-tree) — rely on CONFIG_THP_SWAP + order-aware
+  swap_table clusters; reclaim already avoids splitting when a matching
+  swap cluster exists. Splits for partially mapped folios and for
+  THP_SWPOUT_FALLBACK must remain (reclaim progress). Do NOT ship an
+  ungated never-split patch. No 7.2.9-t8 / 0008-*.patch.
+
+Recommendation
+  - Operators: ensure swap is large enough and not order-0 fragmented if
+    THP/mTHP swpout success matters (watch thp_swpout vs thp_swpout_fallback).
+  - shrink_underused=0 only if max_ptes_none is lowered and deferred
+    underused splits are unwanted; stock max_ptes_none=511 already disables
+    underused detection.
+  - Leave reclaim free to split on partial map / swap-alloc failure.
+  - Application path: MADV_HUGEPAGE for large anon (Task 6); avoid
+    punching holes inside THPs if keeping PMD folios matters.
+
+Suggested next high-impact remaining task (survey-only note)
+  Remaining open high-impact items from roadmap after 6–8:
+    Task 10 (cache-miss accounting as first-class) — measurement/policy,
+      low risk, builds on existing harness cache_misses.
+    Task 11 (util_est for placement) — scheduler; needs wake/migrate load.
+    Task 13 (unbound work LLC pin) — locality; measurable with storage/general.
+  Highest safe next: Task 10 (instrumentation / reporting) or Task 13
+  (locality) after a short survey. Do not auto-start here.
+
+Artifacts
+  report : reports/task8-before-after.txt (box + server)
+  prep   : reports/task8-survey-prep.txt
+  workload: workloads/src/folio_split.c, workloads/folio_split.sh
+  runs   : runs/PARTIAL-task8, runs/UNDERUSED-task8, runs/SWAPFB-task8,
+           runs/BASELINE-task8→PARTIAL
+  patch  : none

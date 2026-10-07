@@ -1,0 +1,32 @@
+# Redundant with unpacked linux-7.2.9/ tree
+*.tar.xz
+parts/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Local editor / OS junk
+*.swp
+*~
+.idea/
+.vscode/
+
+# Kernel build artifacts (stock tree should stay clean; belt-and-suspenders)
+linux-7.2.9/.config
+linux-7.2.9/.config.old
+linux-7.2.9/vmlinux
+linux-7.2.9/vmlinux.*
+linux-7.2.9/System.map
+linux-7.2.9/Module.symvers
+linux-7.2.9/modules.builtin
+linux-7.2.9/modules.order
+linux-7.2.9/*.o
+linux-7.2.9/*.ko
+linux-7.2.9/*.mod
+linux-7.2.9/*.mod.c
+linux-7.2.9/.tmp_versions/
+
+# Large raw measurement runs (lean index kept under kernel-measure/runs/)
+kernel-measure/runs/**/perf.data
+kernel-measure/runs/**/perf.data.*

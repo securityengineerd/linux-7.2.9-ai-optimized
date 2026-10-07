@@ -1,0 +1,97 @@
+Task 5 (buffered-read copy avoidance) — application-path PASS on stock
+=======================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+Stock measured: Mon Oct 5 2026, 21:14 PT (= 04:14 UTC Oct 6) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 5 --schedstats
+Workload: hot_read = build/hot_read -d 12 -s 64 -b 128 (auto target ~6000 MiB/path)
+Every run status=ok. Same byte budget + matching checksums across all three paths.
+No patched kernel was built. Baseline tree linux-7.2.9-baseline was not modified.
+
+Kernels /boot present
+  stock   : 7.2.9-baseline (measured)
+  also    : 7.2.9-ai-opt, 7.2.9-t3, 7.2.9-t9, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after stock measure; no t5 image installed)
+
+Survey (Phase 1)
+  Baseline tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (not modified).
+  filemap_read(): hot buffered path copies via copy_folio_to_iter() for every
+  userspace pread of an already-cached folio.
+  IOCB_DONTCACHE / dropbehind: marks folios to drop AFTER the copy (cold/
+  streaming pollution control). Does not skip the copy on a hot hit.
+  O_DIRECT (generic_file_read_iter + IOCB_DIRECT): mapping->a_ops->direct_IO,
+  DMA into user buffer — no page-cache copy. App must align buf/off/len.
+  mmap (filemap_map_pages): maps uptodate folios into the VMA; after fault-in,
+  loads are userspace DRAM access with no syscall and no copy_folio_to_iter.
+  Roadmap: "Better mechanism: mmap or O_DIRECT — application-path change,
+  not a new kernel read syscall." Full notes: reports/task5-survey.txt.
+
+Harness
+  Task 5 previously used generic database+storage (sqlite / fio), which do
+  not isolate the page-cache copy. Added targeted workload hot_read (C) and
+  rewired tasks.conf Task 5 -> hot_read. Synced /workspace <-> server.
+
+What was attempted
+  - Survey filemap_read / DONTCACHE / O_DIRECT / filemap_map_pages (read-only).
+  - New workload + 3x stock measure on 7.2.9-baseline.
+  - Looked for a small safe kernel tweak that would remove the hot buffered
+    copy while keeping pread semantics. None found that is clearly correct
+    without becoming mmap/O_DIRECT by another name. No fake kernel win.
+  - No linux-7.2.9-t5 tree, no 0005-*.patch, no rebuild.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261006T041428+0000-task5   (runs/BASELINE-task5 -> this)
+  stock S2  20261006T041434+0000-task5
+  stock S3  20261006T041440+0000-task5
+  patched: none (not needed — application-path result)
+
+Same-work proof (each path reads wl_target_bytes = 6291456000 ≈ 6000 MiB)
+  checksum identical across buffered/mmap/O_DIRECT on every run
+  (wl_*_checksum=16964066620198416682).
+
+Per-path wall for the same bytes (primary Task 5 signal)
+  metric                              S1            S2            S3
+  wl_buffered_bytes_per_sec (x1e9)   5.775         6.492         5.780
+  wl_mmap_bytes_per_sec (x1e9)       9.055         9.787         9.061
+  wl_odirect_bytes_per_sec (x1e9)    2.075         2.070         2.042
+  wl_buffered_ns (x1e9)              1.089         0.969         1.089
+  wl_mmap_ns (x1e9)                  0.695         0.643         0.694
+  wl_odirect_ns (x1e9)               3.033         3.039         3.082
+  wl_mmap_vs_buffered_ns_ratio       0.638         0.663         0.638
+  wl_odirect_vs_buffered_ns_ratio    2.784         3.136         2.831
+
+Whole-run perf (wraps setup + all three paths; not a free variable)
+  cycles (x1e9)                     12.86         12.94         12.93
+  instructions (x1e9)               17.17         17.17         17.17
+  cache_misses (x1e6)              197.9         201.2         198.7
+  wall_time_sec                      4.983         4.807         5.006
+
+How to read
+  Pass gate is "lower cycles for same read work when mmap/O_DIRECT avoids
+  buffered copy." Per-path wall_ns for equal bytes is the direct proof:
+  mmap finishes the same 6000 MiB in ~64% of buffered wall (ratio 0.638–
+  0.663 on all 3 runs) — the copy_folio_to_iter / pread tax is gone after
+  fault-in. O_DIRECT on an already-hot page-cache file is ~2.8–3.1× slower
+  on wall here because it re-reads from NVMe instead of DRAM; that is the
+  expected hot-cache comparison, not a failure of O_DIRECT. O_DIRECT still
+  avoids the page-cache copy (and double-buffering) when the application
+  owns its own buffer pool — a different cost model than "hot pread vs DIO".
+  Whole-run perf cycles stay flat by construction (all three paths always
+  run); do not treat aggregate cycles as the pass metric.
+
+Verdict: PASS (application-path) — no kernel patch
+  - mmap beats hot buffered pread on every run for the same bytes
+    (~36% less wall-ns; ~1.5–1.6× throughput).
+  - O_DIRECT correctly bypasses page-cache copy but loses to hot buffered
+    on wall when data is already cached; report that honestly.
+  - No 0005 patch / linux-7.2.9-t5: inventing a second buffered-read path
+    that skips the copy would just be mmap/O_DIRECT under another name.
+  - Recommendation: callers that need hot zero-copy should mmap (or use
+    O_DIRECT when they manage their own cache). Kernel left on known-good
+    7.2.9-t9 after measure.
+
+Report / artifact paths
+  /home/kernelmaster/kernel-measure/reports/task5-before-after.txt
+  /home/kernelmaster/kernel-measure/reports/task5-survey.txt
+  /workspace/kernel-measure/reports/task5-before-after.txt  (synced)
+  Workload: workloads/src/hot_read.c, workloads/hot_read.sh
+  No patch. No linux-7.2.9-t5 tree.

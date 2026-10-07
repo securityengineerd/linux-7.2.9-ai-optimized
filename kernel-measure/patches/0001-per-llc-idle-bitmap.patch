@@ -1,0 +1,280 @@
+sched/fair: track idle CPUs with a per-LLC bitmap
+
+select_idle_cpu() capped a linear walk of the LLC. Keep a per-LLC idle
+cpumask on sched_domain_shared, set and cleared with atomic bitops from
+the idle class enter/exit path, and consult it from select_idle_cpu()
+after the fast target/prev/recent_used_cpu candidates miss.
+
+SIS_UTIL's overloaded early-out, the SMT idle-core walk, asym capacity
+selection, and asym packing load-balance are unchanged. If the bitmap
+is empty or stale, select_idle_cpu() falss back to the old walk.
+
+Not compile-tested: no kernel config on this tree, and a full x86 build
+was not run.
+
+--- a/include/linux/sched/topology.h
++++ b/include/linux/sched/topology.h
+@@ -82,6 +82,12 @@
+ 		 */
+ 		int	alloc_flags;
+ 	};
++	/*
++	 * Idle CPUs in this domain. The LLC shared object is the one
++	 * select_idle_cpu() reads. Bits are set and cleared with atomic
++	 * bitops from idle enter/exit; the wakeup path takes no extra lock.
++	 */
++	cpumask_var_t	idle_cpus;
+ #ifdef CONFIG_SCHED_CACHE
+ 	unsigned long	util_avg;
+ 	unsigned long	capacity;
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1706,6 +1706,10 @@
+ 	if (sched_smt_active())
+ 		__update_idle_core(rq);
+ }
++
++/* Per-LLC idle bitmap, maintained by the idle class. */
++extern void llc_idle_enter(int cpu);
++extern void llc_idle_exit(int cpu);
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static inline struct task_struct *task_of(struct sched_entity *se)
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8613,6 +8613,107 @@
+ }
+ 
+ /*
++ * Per-LLC idle CPU bitmap.
++ *
++ * llc_idle_enter()/llc_idle_exit() run from the idle class with this
++ * CPU's rq lock held and publish one bit with cpumask_set_cpu()/
++ * cpumask_clear_cpu() (atomic set_bit/clear_bit). The wakeup path only
++ * tests bits and may clear a stale one. It does not take a lock.
++ */
++void llc_idle_enter(int cpu)
++{
++	struct sched_domain_shared *sds;
++
++	rcu_read_lock();
++	sds = rcu_dereference_all(per_cpu(sd_llc_shared, cpu));
++	if (sds && cpumask_available(sds->idle_cpus))
++		cpumask_set_cpu(cpu, sds->idle_cpus);
++	rcu_read_unlock();
++}
++
++void llc_idle_exit(int cpu)
++{
++	struct sched_domain_shared *sds;
++
++	rcu_read_lock();
++	sds = rcu_dereference_all(per_cpu(sd_llc_shared, cpu));
++	if (sds && cpumask_available(sds->idle_cpus))
++		cpumask_clear_cpu(cpu, sds->idle_cpus);
++	rcu_read_unlock();
++}
++
++/* Re-check one bitmap bit. Clear it when the CPU is no longer idle. */
++static int llc_idle_bitmap_cpu(struct task_struct *p, struct cpumask *idle,
++			       int cpu)
++{
++	if (!cpumask_test_cpu(cpu, p->cpus_ptr))
++		return -1;
++
++	if ((unsigned int)__select_idle_cpu(cpu, p) < nr_cpumask_bits)
++		return cpu;
++
++	/*
++	 * Affinity and core-cookie misses leave the bit set. A busy CPU
++	 * that is not a SCHED_IDLE runqueue is a stale bit.
++	 */
++	if (!available_idle_cpu(cpu) && !sched_idle_rq(cpu_rq(cpu)))
++		cpumask_clear_cpu(cpu, idle);
++
++	return -1;
++}
++
++/*
++ * First allowed idle CPU in @span, wrapping the same way the linear
++ * LLC walk does (start at target + 1). Only set bits are visited.
++ */
++static int llc_idle_bitmap_pick(struct task_struct *p, struct cpumask *idle,
++				const struct cpumask *span, int target)
++{
++	int cpu, idle_cpu;
++
++	for_each_cpu_wrap(cpu, idle, target + 1) {
++		if (!cpumask_test_cpu(cpu, span))
++			continue;
++
++		idle_cpu = llc_idle_bitmap_cpu(p, idle, cpu);
++		if ((unsigned int)idle_cpu < nr_cpumask_bits)
++			return idle_cpu;
++	}
++
++	return -1;
++}
++
++static int select_idle_cpu_bitmap(struct task_struct *p, struct sched_domain *sd,
++				  int target)
++{
++	struct cpumask *idle;
++	int cpu;
++
++	if (!sd->shared || !cpumask_available(sd->shared->idle_cpus))
++		return -1;
++
++	idle = sd->shared->idle_cpus;
++
++	/*
++	 * Cluster machines still prefer an idle CPU that shares the
++	 * target's lower cache. That used to be the first loop of the
++	 * linear walk; do it against the bitmap so a hit keeps it.
++	 */
++	if (static_branch_unlikely(&sched_cluster_active)) {
++		struct sched_group *sg = sd->groups;
++
++		if (sg->flags & SD_CLUSTER) {
++			cpu = llc_idle_bitmap_pick(p, idle,
++						   sched_group_span(sg), target);
++			if ((unsigned int)cpu < nr_cpumask_bits)
++				return cpu;
++		}
++	}
++
++	return llc_idle_bitmap_pick(p, idle, sched_domain_span(sd), target);
++}
++
++/*
+  * Scan the LLC domain for idle CPUs; this is dynamically regulated by
+  * comparing the average scan cost (tracked in sd->avg_scan_cost) against the
+  * average idle time for this rq (as found in rq->avg_idle).
+@@ -8636,6 +8737,24 @@
+ 		/* overloaded LLC is unlikely to have idle cpu/core */
+ 		if (nr == 1)
+ 			return -1;
++	}
++
++	/*
++	 * SMT idle-core search stays on the linear walk: the bitmap names
++	 * idle CPUs, not idle cores. Asym capacity returns before this
++	 * function; asym packing is left in load balance.
++	 */
++	if (!has_idle_core) {
++		i = select_idle_cpu_bitmap(p, sd, target);
++		if ((unsigned int)i < nr_cpumask_bits)
++			return i;
++
++		/*
++		 * Bitmap empty or stale (no allowed idle CPU left in it).
++		 * Fall back to the capped linear LLC walk below. That walk
++		 * still applies the SIS_UTIL scan limit and can place on a
++		 * SCHED_IDLE runqueue, which this bitmap does not track.
++		 */
+ 	}
+ 
+ 	if (!cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr))
+@@ -8993,6 +9112,10 @@
+ 		}
+ 	}
+ 
++	/*
++	 * target, prev and recent_used_cpu already missed. select_idle_cpu()
++	 * consults the per-LLC idle bitmap before the capped linear walk.
++	 */
+ 	i = select_idle_cpu(p, sd, has_idle_core, target);
+ 	if ((unsigned)i < nr_cpumask_bits)
+ 		return i;
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -485,11 +485,13 @@
+ 	update_curr_idle(rq);
+ 	scx_update_idle(rq, false, true);
+ 	update_rq_avg_idle(rq);
++	llc_idle_exit(cpu_of(rq));
+ }
+ 
+ static void set_next_task_idle(struct rq *rq, struct task_struct *next, bool first)
+ {
+ 	update_idle_core(rq);
++	llc_idle_enter(cpu_of(rq));
+ 	scx_update_idle(rq, true, true);
+ 	schedstat_inc(rq->sched_goidle);
+ 	next->se.exec_start = rq_clock_task(rq);
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -8772,8 +8772,11 @@
+ 	 * Remove CPU from nohz.idle_cpus_mask to prevent participating in
+ 	 * load balancing when not active
+ 	 */
+-	scoped_guard (rcu)
++	scoped_guard (rcu) {
+ 		nohz_balance_exit_idle(rq);
++		/* Drop a stale idle bit if this CPU was still marked idle. */
++		llc_idle_exit(cpu);
++	}
+ 
+ 	set_cpu_active(cpu, false);
+ 
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -625,8 +625,10 @@
+ 
+ static void free_sched_domain_shared(struct sched_domain_shared *sds)
+ {
+-	if (sds && atomic_dec_and_test(&sds->ref))
++	if (sds && atomic_dec_and_test(&sds->ref)) {
++		free_cpumask_var(sds->idle_cpus);
+ 		kfree(sds);
++	}
+ }
+ 
+ static void destroy_sched_domain(struct sched_domain *sd)
+@@ -705,6 +707,14 @@
+ 	rcu_assign_pointer(per_cpu(sd_llc, cpu), sd);
+ 	per_cpu(sd_llc_size, cpu) = size;
+ 	rcu_assign_pointer(per_cpu(sd_llc_shared, cpu), sds);
++
++	/*
++	 * A CPU already in the idle class does not call llc_idle_enter()
++	 * again just because the domain was rebuilt. Seed its bit. A
++	 * racing wakeup treats a stale bit as a miss.
++	 */
++	if (sds && cpumask_available(sds->idle_cpus) && idle_rq(cpu_rq(cpu)))
++		cpumask_set_cpu(cpu, sds->idle_cpus);
+ 
+ 	sd = lowest_flag_domain(cpu, SD_CLUSTER);
+ 	if (sd)
+@@ -2765,7 +2775,13 @@
+ 		sds = kzalloc_node(sizeof(struct sched_domain_shared),
+ 				GFP_KERNEL, cpu_to_node(j));
+ 		if (!sds)
++			return -ENOMEM;
++
++		if (!zalloc_cpumask_var_node(&sds->idle_cpus, GFP_KERNEL,
++					     cpu_to_node(j))) {
++			kfree(sds);
+ 			return -ENOMEM;
++		}
+ 
+ 		*per_cpu_ptr(d->sds, j) = sds;
+ 	}
+@@ -2780,9 +2796,15 @@
+ 	if (!d->sds)
+ 		return;
+ 
+-	for_each_cpu(j, cpu_map)
+-		kfree(*per_cpu_ptr(d->sds, j));
++	for_each_cpu(j, cpu_map) {
++		struct sched_domain_shared *sds = *per_cpu_ptr(d->sds, j);
+ 
++		if (!sds)
++			continue;
++		free_cpumask_var(sds->idle_cpus);
++		kfree(sds);
++	}
++
+ 	free_percpu(d->sds);
+ 	d->sds = NULL;
+ }

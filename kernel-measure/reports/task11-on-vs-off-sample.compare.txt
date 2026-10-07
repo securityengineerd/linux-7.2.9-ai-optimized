@@ -1,0 +1,104 @@
+before: runs/20261006T165510+0000-task11
+after:  runs/20261006T165735+0000-task11
+delta = after - before
+task 11: util_est for placement
+measures: Burst-aware placement without removing PELT
+workloads: util_est_burst wake_llc general
+primary metrics: wl_bursts_per_sec wl_wake_lat_p50_ns wl_wake_lat_p99_ns wl_burst_migrate_frac wl_sched_feat_util_est cycles instructions ipc rq_latency_ns cpu_migrations cache_misses ttwu_remote_delta
+
+== util_est_burst ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: build/util_est_burst -d 15 -b 12 -h 4 -o 5000 -f 80000 (nproc=12)
+metric                                before              after              delta       delta%
+wall time (s)                         15.164             15.190           0.026000       +0.17%
+bursts/sec                           140.967            140.982           0.015000       +0.01%
+wake-lat p50 (ns)                      48000              48000                  0       +0.00%
+wake-lat p99 (ns)                     768000              96000            -672000      -87.50%
+burst migrate frac                  0.050377           0.018832          -0.031545      -62.62%
+cycles                          330736437407       329769403987         -967033420       -0.29%
+instructions                    441062560548       438245527714        -2817032834       -0.64%
+ipc                                    1.334              1.329          -0.005000       -0.37%
+rq_latency_ns (schedstat)              30500              31571               1071       +3.51%
+cpu_migrations                           142                 49                -93      -65.49%
+cache-misses                          660377             530067            -130310      -19.73%
+ttwu-remote                             2036                298              -1738      -85.36%
+wl_burst_cpu_changes                     107                 40                -67      -62.62%
+wl_burst_cpu_samples                    2124               2124                  0       +0.00%
+wl_bursts                               2124               2124                  0       +0.00%
+wl_busy_ns                       10629487340        10632149817            2662477       +0.03%
+wl_duration_sec                           15                 15                  0       +0.00%
+wl_hog_busy_ns                   60000782614        60001851554            1068940       +0.00%
+wl_hog_cpu_changes                         5                  2                 -3      -60.00%
+wl_hog_cpu_samples                     59996              59997                  1       +0.00%
+wl_hog_migrate_frac                 0.000083           0.000033          -0.000050      -60.24%
+wl_nburst                                 12                 12                  0       +0.00%
+wl_nhog                                    4                  4                  0       +0.00%
+wl_off_us                              80000              80000                  0       +0.00%
+wl_on_us                                5000               5000                  0       +0.00%
+wl_sleep_ns                     170091071524       170078349236          -12722288       -0.01%
+wl_wake_lat_avg_ns                     80542              74552              -5990       -7.44%
+wl_wake_lat_max_ns                   2492042            2844444             352402      +14.14%
+wl_wall_ns                       15067338269        15065765941           -1572328       -0.01%
+
+== wake_llc ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20 (nproc=12)
+metric                                    before              after              delta       delta%
+wall time (s)                             20.085             20.082          -0.003000       -0.01%
+cycles                              294645799416       306395428700        11749629284       +3.99%
+instructions                        398381772000       410256299670        11874527670       +2.98%
+ipc                                        1.352              1.339          -0.013000       -0.96%
+rq_latency_ns (schedstat)                   5926               6587                661      +11.15%
+cpu_migrations                              8006              47883              39877     +498.09%
+cache-misses                              365316             337207             -28109       -7.69%
+ttwu-remote                               460258             471263              11005       +2.39%
+wl_busy_cpu_changed_permille                  21                 21                  0       +0.00%
+wl_busy_missed_periods                         1                  3                  2     +200.00%
+wl_busy_on_waker_cpu_permille                175                151                -24      -13.71%
+wl_busy_rounds                             19998              19996                 -2       -0.01%
+wl_busy_wake_lat_max_ns                  2656791            2675991              19200       +0.72%
+wl_busy_wake_lat_mean_ns                   16377              15601               -776       -4.74%
+wl_busy_wake_lat_p50_ns                    15250              14500               -750       -4.92%
+wl_busy_wake_lat_p90_ns                    31500              29000              -2500       -7.94%
+wl_busy_wake_lat_p999_ns                   72250              59250             -13000      -17.99%
+wl_busy_wake_lat_p99_ns                    49500              41500              -8000      -16.16%
+wl_busy_wakes                             239976             239952                -24       -0.01%
+wl_idle_cpu_changed_permille                   1                142                141   +14100.00%
+wl_idle_missed_periods                         0                  0                  0          n/a
+wl_idle_on_waker_cpu_permille                 42                 45                  3       +7.14%
+wl_idle_rounds                             20000              20000                  0       +0.00%
+wl_idle_wake_lat_max_ns                   669063             581677             -87386      -13.06%
+wl_idle_wake_lat_mean_ns                   19513              25997               6484      +33.23%
+wl_idle_wake_lat_p50_ns                    20500              21250                750       +3.66%
+wl_idle_wake_lat_p90_ns                    38500              61500              23000      +59.74%
+wl_idle_wake_lat_p999_ns                  121500              99500             -22000      -18.11%
+wl_idle_wake_lat_p99_ns                    40500              82750              42250     +104.32%
+wl_idle_wakes                             240000             240000                  0       +0.00%
+
+== general ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief 
+metric                                before              after              delta       delta%
+wall time (s)                         10.079             10.055          -0.024000       -0.24%
+cycles                          149551804258       149473888428          -77915830       -0.05%
+instructions                    245540838928       248126696004         2585857076       +1.05%
+ipc                                    1.642              1.660           0.018000       +1.10%
+rq_latency_ns (schedstat)               4104               4127                 23       +0.56%
+cpu_migrations                          1741               1617               -124       -7.12%
+cache-misses                       252275410          261074623            8799213       +3.49%
+ttwu-remote                            75955              77621               1666       +2.19%
+
+pass/fail note (judge by hand, across repeated runs): Better placement responsiveness on bursty load; do not require PELT removal; stock UTIL_EST already on
+No verdict is computed. One run per side is not enough to claim a win.

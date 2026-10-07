@@ -1,0 +1,31 @@
+#!/usr/bin/env bpftrace
+/*
+ * Runqueue latency histogram.
+ * Time from sched_wakeup of a task until sched_switch selects that task.
+ *
+ * Field names match Linux 7.2.9 include/trace/events/sched.h:
+ *   sched_wakeup pid      is the wakee
+ *   sched_switch next_pid is the task switched onto the CPU
+ *
+ * collect.sh runs this only when bpftrace is installed. If it is not,
+ * the run records "bpftrace not installed" and continues.
+ */
+
+tracepoint:sched:sched_wakeup
+/args->pid != 0/
+{
+	@wake_ns[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch
+{
+	if (args->next_pid != 0 && @wake_ns[args->next_pid]) {
+		@runq_us = hist((nsecs - @wake_ns[args->next_pid]) / 1000);
+		delete(@wake_ns[args->next_pid]);
+	}
+}
+
+END
+{
+	clear(@wake_ns);
+}

@@ -1,0 +1,5 @@
+source=/workspace/kernel-measure/workloads/src/softirq_storm.c
+source_sha256=247dd8bca6179063aac76b4bb605fb06c5605a2571fffa3742a2cf65f6db75a5
+compiler=cc
+cc (Debian 14.2.0-19) 14.2.0
+built=2026-10-06T10:05:36-0700

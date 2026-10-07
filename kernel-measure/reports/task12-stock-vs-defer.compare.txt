@@ -1,0 +1,71 @@
+before: runs/BASELINE-task12
+after:  runs/DEFER-task12
+delta = after - before
+task 12: softirq/RCU off irq-exit
+measures: Tail latency under softirq-heavy paths
+workloads: softirq_storm networking storage
+primary metrics: wl_softirq_total_delta wl_softirq_timer_delta wl_softirq_net_rx_delta wl_softirq_rcu_delta wl_ksoftirqd_ms_delta wl_wake_lat_p50_ns wl_wake_lat_p99_ns wl_rcu_stall_lines_delta rq_latency_ns wall_time_sec cycles
+
+== softirq_storm ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: /home/kernelmaster/kernel-measure/build/softirq_storm -d 15 -t 4 -n 4 -r 2
+metric                                    before              after              delta       delta%
+wall time (s)                             18.714             20.154           1.440000       +7.69%
+softirq total delta                     20269758           19193137           -1076621       -5.31%
+TIMER softirq delta                         2258               2960                702      +31.09%
+NET_RX softirq delta                    20199577           19133122           -1066455       -5.28%
+RCU softirq delta                          24432                  0             -24432     -100.00%
+ksoftirqd CPU ms delta                         0                130                130          n/a
+wake-lat p50 (ns)                        1048576            1048576                  0       +0.00%
+wake-lat p99 (ns)                        1048576            1048576                  0       +0.00%
+RCU stall dmesg delta                          0                  0                  0          n/a
+rq_latency_ns (schedstat)                    101               1456               1355    +1341.58%
+cycles                              214644963929       216136990123         1492026194       +0.70%
+wl_netdev_budget                             300                300                  0       +0.00%
+wl_netdev_budget_usecs                      2000               2000                  0       +0.00%
+wl_nnet                                        4                  4                  0       +0.00%
+wl_nrcu                                        2                  2                  0       +0.00%
+wl_ntimer                                      4                  4                  0       +0.00%
+wl_rcuo_kthreads                               0                 15                 15          n/a
+wl_softirq_hrtimer_delta                       0                  0                  0          n/a
+wl_softirq_net_tx_delta                        7                  5                 -2      -28.57%
+wl_softirq_sched_delta                     43482              57049              13567      +31.20%
+wl_softirq_storm_duration_sec             15.000             15.000           0.000000       +0.00%
+wl_softirq_tasklet_delta                       2                  1                 -1      -50.00%
+wl_wake_lat_avg_ns                       1057544            1062776               5232       +0.49%
+wl_wake_lat_max_ns                       1120705            1219425              98720       +8.81%
+wl_wake_lat_n                              14184              14114                -70       -0.49%
+wl_wake_lat_p90_ns                       1048576            1048576                  0       +0.00%
+
+== networking ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: iperf3 -c 127.0.0.1 -p 15201 -t 8 (server: iperf3 -s -1 --bind 127.0.0.1)
+metric                                before              after              delta       delta%
+wall time (s)                          8.272              8.266          -0.006000       -0.07%
+rq_latency_ns (schedstat)                 10                107                 97     +970.00%
+cycles                           59996593438        59730594002         -265999436       -0.44%
+
+== storage ==
+kernel_before: 7.2.9-baseline
+kernel_after:  7.2.9-baseline
+WARNING: before and after ran on the same kernel (7.2.9-baseline). Differences are run-to-run noise, not a patch effect.
+status_before: ok
+status_after:  ok
+command_before: fio --name=kernel-measure --filename=/tmp/kernel-measure-storage.sDCXW2/benchfile --rw=randrw --bs=4k --size=32M --runtime=8 --time_based=1 --direct=1
+command_after:  fio --name=kernel-measure --filename=/tmp/kernel-measure-storage.uwCOw5/benchfile --rw=randrw --bs=4k --size=32M --runtime=8 --time_based=1 --direct=1
+WARNING: workload command differs; the comparison is not like for like.
+metric                                before              after              delta       delta%
+wall time (s)                          8.485              8.485           0.000000       +0.00%
+rq_latency_ns (schedstat)               3019               5003               1984      +65.72%
+cycles                           36720727744        36666041108          -54686636       -0.15%
+
+pass/fail note (judge by hand, across repeated runs): Prove softirq on irq path; prefer rcu_nocbs/threadirqs/use_softirq knobs over ungated irq-exit rewrite; fail if RCU stalls or packet-loss cliff
+No verdict is computed. One run per side is not enough to claim a win.

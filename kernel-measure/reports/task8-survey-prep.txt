@@ -1,0 +1,71 @@
+Task 8 survey — reclaim splitting of large anonymous folios (7.2.9)
+====================================================================
+Host: kernelmaster@15.204.65.34
+Tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (NOT modified)
+Date: Tue Oct 6 2026 PT
+
+Roadmap ask
+  "Stop reclaim from splitting large anonymous folios."
+  What exists: shrink_folio_list splits a large folio when a matching swap
+  slot is missing, then walks PTEs with TTU_SYNC.
+  Better mechanism (roadmap): struct swap_table per-cluster; keep swap
+  clusters at the folio's order so mTHP is not torn down on the way out.
+
+What 7.2.9 already does (read-only survey)
+  1. CONFIG_THP_SWAP=y on baseline and t9.
+  2. mm/swap_table.h — per-cluster atomic table (SWAPFILE_CLUSTER =
+     HPAGE_PMD_NR when THP_SWAP). Roadmap "better mechanism" is in-tree.
+  3. folio_alloc_swap(folio) allocates at folio_order; swap_alloc_fast/slow
+     walk free/nonfull/frag clusters of that order (cluster_is_usable).
+  4. shrink_folio_list (mm/vmscan.c ~1255–1295):
+       - partially mapped + on deferred list → split_folio_to_list (free
+         unmapped pages without IO)
+       - folio_alloc_swap(large) fails → split_folio_to_list, count
+         THP_SWPOUT_FALLBACK / MTHP_STAT_SWPOUT_FALLBACK, retry order-0
+       - success → whole-folio swapcache; try_to_unmap with TTU_SYNC
+         (| TTU_SPLIT_HUGE_PMD for PMD-mappable)
+  5. Deferred split:
+       - map_anon_folio_pmd_nopf queues every new PMD anon via
+         deferred_split_folio(folio, false) for underused scanning
+       - rmap queues partially_mapped via deferred_split_folio(folio, true)
+         and counts THP_DEFERRED_SPLIT_PAGE
+       - shrink_underused sysfs (default 1) gates non-partial queueing
+       - thp_underused() is a no-op when khugepaged max_ptes_none ==
+         HPAGE_PMD_NR-1 (stock 511) — underused deferred split disabled
+
+Existing knobs (prefer over patch)
+  /sys/kernel/mm/transparent_hugepage/shrink_underused   (0|1, stock 1)
+  /sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none  (stock 511)
+  CONFIG_THP_SWAP / transparent_hugepage/enabled|defrag
+  MADV_HUGEPAGE / MADV_NOHUGEPAGE / MADV_DONTNEED / MADV_PAGEOUT
+  Swap size and fragmentation (order-matched clusters need free clusters)
+
+Risk gate
+  Refusing to split when folio_alloc_swap fails, or never splitting
+  partially mapped folios, blocks reclaim progress → OOM risk.
+  Any kernel change would need sysctl default OFF + oom_kill=0 proof.
+  Honest first answer: document in-tree order-aware swap; measure.
+
+Smoke (on 7.2.9-t9 before formal baseline runs)
+  partial 1024 MiB THP + punch + hog:
+    thp_split_page=+512, deferred_split=+512, split_pmd=+512,
+    pgscan_direct=+20k, pgscan_kswapd=+66k, oom=0
+  underused 1024 MiB (first page only) + hog:
+    thp_swpout=+510, thp_swpout_fallback=+2, split=+2, oom=0
+    → reclaim already keeps ~99.6% of PMD folios whole on swap-out
+  swapfb (fragment swap then reclaim THPs):
+    thp_swpout=+310, thp_swpout_fallback=+202, split=+202, oom=0
+    → fallback/split path fires when high-order swap unavailable
+  shrink_underused 0 vs 1 with max_ptes_none=64: no delta on this recipe
+    (reclaim swpouts before underused shrinker matters)
+
+Harness
+  workloads/src/folio_split.c + workloads/folio_split.sh
+  tasks.conf Task 8 → folio_split
+  Modes: partial | swapfb | underused
+  Policy hook: FOLIOSPLIT_SHRINK_UNDERUSED=
+
+Decision lean
+  A) PASS policy — existing order-aware THP_SWAP already expresses intent;
+     prove split path on stock; prove whole-folio swpout dominates when
+     swap order matches; no 0008 patch / no never-split.

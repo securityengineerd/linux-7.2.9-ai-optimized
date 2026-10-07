@@ -1,0 +1,320 @@
+sched/fair: per-LLC idle bitmap v2 (lazy clear, wrap from target)
+
+Rework of the per-LLC idle_cpus hint on sched_domain_shared.
+
+v1 wrote the shared bitmap unconditionally on every idle enter and
+exit, and walked set bits from a fixed (target+1) start. Measured
+wakeup-storm busy-phase regressions vs stock 7.2.9 pointed at those
+two behaviors (shared-line bouncing across the LLC, and pile-up onto
+low-numbered CPUs).
+
+v2 changes:
+
+1. Cut shared writes.
+   - llc_idle_enter() only sets the bit when it was clear
+     (test_bit before set_bit).
+   - Idle exit no longer clears: put_prev_task_idle does not touch the
+     bitmap. A waker that finds a candidate busy clears the stale bit
+     (also test-before-clear). Hotplug still clears via llc_idle_clear()
+     after set_cpu_active(false), so a deactivated CPU cannot re-publish.
+   - Domain-attach seeding is likewise test-first.
+
+2. Search from the target.
+   - Snap LLC span & p->cpus_ptr & idle_cpus into the select_rq_mask
+     scratch, then for_each_cpu_wrap(..., target) so candidates near
+     the waker/wakee are preferred. Cluster-first preference is kept
+     (same shape as the linear walk). Affinity uses p->cpus_ptr exactly
+     as the existing walk does.
+
+3. Unchanged: SIS_UTIL early-out, has_idle_core / select_idle_core,
+   select_idle_capacity, and the capped linear walk as fallback when
+   the bitmap yields nothing.
+
+Applies to stock 7.2.9 with patch -p1.
+
+--- a/include/linux/sched/topology.h
++++ b/include/linux/sched/topology.h
+@@ -82,6 +82,13 @@
+ 		 */
+ 		int	alloc_flags;
+ 	};
++	/*
++	 * Idle-CPU hint for this domain. The LLC shared object is the one
++	 * select_idle_cpu() reads. A bit is set (test-first) on idle entry
++	 * and cleared lazily (test-first) by a waker that finds the CPU
++	 * busy, or on hotplug deactivate. Not cleared on idle exit.
++	 */
++	cpumask_var_t	idle_cpus;
+ #ifdef CONFIG_SCHED_CACHE
+ 	unsigned long	util_avg;
+ 	unsigned long	capacity;
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1707,6 +1707,10 @@
+ 		__update_idle_core(rq);
+ }
+ 
++/* Per-LLC idle bitmap: set on idle entry, cleared lazily by wakers. */
++extern void llc_idle_enter(int cpu);
++extern void llc_idle_clear(int cpu);
++
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static inline struct task_struct *task_of(struct sched_entity *se)
+ {
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8613,6 +8613,132 @@
+ }
+ 
+ /*
++ * Per-LLC idle CPU bitmap.
++ *
++ * The bitmap is a hint, not an exact idle set. A set bit means "this CPU
++ * entered the idle class and no waker has seen it busy since". It is NOT
++ * cleared when the CPU leaves idle (lazy clearing), and every writer
++ * tests the bit first so the shared cache line is only written when the
++ * bit value actually changes:
++ *
++ *  - llc_idle_enter() runs from set_next_task_idle() with this CPU's rq
++ *    lock held and sets the bit only if it is clear. A CPU bouncing in
++ *    and out of idle while its bit is still set does no shared write.
++ *  - select_idle_cpu_bitmap() rechecks every candidate with
++ *    __select_idle_cpu() and clears a bit it finds stale (CPU busy and
++ *    not a SCHED_IDLE runqueue), again only if the bit is still set.
++ *  - llc_idle_clear() drops the bit on hotplug deactivate.
++ *
++ * A lost bit (a waker clears it just as the CPU re-enters idle) only
++ * costs the hint: the capped linear walk still finds that CPU, and its
++ * next idle entry sets the bit again.
++ */
++static inline struct cpumask *llc_idle_mask(int cpu)
++{
++	struct sched_domain_shared *sds;
++
++	sds = rcu_dereference_all(per_cpu(sd_llc_shared, cpu));
++	if (sds && cpumask_available(sds->idle_cpus))
++		return sds->idle_cpus;
++	return NULL;
++}
++
++void llc_idle_enter(int cpu)
++{
++	struct cpumask *idle;
++
++	/* A deactivated (going offline) CPU must not re-publish itself. */
++	if (!cpu_active(cpu))
++		return;
++
++	rcu_read_lock();
++	idle = llc_idle_mask(cpu);
++	if (idle && !cpumask_test_cpu(cpu, idle))
++		cpumask_set_cpu(cpu, idle);
++	rcu_read_unlock();
++}
++
++void llc_idle_clear(int cpu)
++{
++	struct cpumask *idle;
++
++	rcu_read_lock();
++	idle = llc_idle_mask(cpu);
++	if (idle && cpumask_test_cpu(cpu, idle))
++		cpumask_clear_cpu(cpu, idle);
++	rcu_read_unlock();
++}
++
++/*
++ * Re-check one candidate taken from the bitmap. @cpu is already known to
++ * be in the LLC span and in p->cpus_ptr. Clear the live bit when the CPU
++ * is no longer idle; core-cookie misses on an idle CPU keep the bit.
++ */
++static int llc_idle_bitmap_cpu(struct task_struct *p, struct cpumask *idle,
++			       int cpu)
++{
++	if ((unsigned int)__select_idle_cpu(cpu, p) < nr_cpumask_bits)
++		return cpu;
++
++	if (!available_idle_cpu(cpu) && !sched_idle_rq(cpu_rq(cpu)) &&
++	    cpumask_test_cpu(cpu, idle))
++		cpumask_clear_cpu(cpu, idle);
++
++	return -1;
++}
++
++/*
++ * Pick an idle CPU from the per-LLC bitmap. @cpus is the caller's scratch
++ * mask (select_rq_mask); it is overwritten here.
++ *
++ * Candidates are snapshotted once as LLC span & p->cpus_ptr & idle_cpus,
++ * so the shared bitmap line is read once and the iteration below cannot
++ * be disturbed by concurrent set/clear. The walk wraps starting at
++ * @target, so wakeups spread out from the waker's/wakee's own position
++ * instead of piling onto the lowest-numbered idle CPUs. As in the linear
++ * walk, CPUs sharing @target's cluster are tried first.
++ */
++static int select_idle_cpu_bitmap(struct task_struct *p, struct sched_domain *sd,
++				  struct cpumask *cpus, int target)
++{
++	struct cpumask *idle;
++	int cpu;
++
++	if (!sd->shared || !cpumask_available(sd->shared->idle_cpus))
++		return -1;
++
++	idle = sd->shared->idle_cpus;
++
++	if (!cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr))
++		return -1;
++	if (!cpumask_and(cpus, cpus, idle))
++		return -1;
++
++	if (static_branch_unlikely(&sched_cluster_active)) {
++		struct sched_group *sg = sd->groups;
++
++		if (sg->flags & SD_CLUSTER) {
++			for_each_cpu_wrap(cpu, sched_group_span(sg), target) {
++				if (!cpumask_test_cpu(cpu, cpus))
++					continue;
++
++				if ((unsigned int)llc_idle_bitmap_cpu(p, idle, cpu) <
++				    nr_cpumask_bits)
++					return cpu;
++			}
++			cpumask_andnot(cpus, cpus, sched_group_span(sg));
++		}
++	}
++
++	for_each_cpu_wrap(cpu, cpus, target) {
++		if ((unsigned int)llc_idle_bitmap_cpu(p, idle, cpu) < nr_cpumask_bits)
++			return cpu;
++	}
++
++	return -1;
++}
++
++/*
+  * Scan the LLC domain for idle CPUs; this is dynamically regulated by
+  * comparing the average scan cost (tracked in sd->avg_scan_cost) against the
+  * average idle time for this rq (as found in rq->avg_idle).
+@@ -8638,6 +8764,25 @@
+ 			return -1;
+ 	}
+ 
++	/*
++	 * SMT idle-core search stays on the linear walk: the bitmap names
++	 * idle CPUs, not idle cores. Asym capacity returns before this
++	 * function; asym packing is left in load balance.
++	 */
++	if (!has_idle_core) {
++		i = select_idle_cpu_bitmap(p, sd, cpus, target);
++		if ((unsigned int)i < nr_cpumask_bits)
++			return i;
++
++		/*
++		 * Bitmap empty or stale (no allowed idle CPU left in it).
++		 * Fall back to the capped linear LLC walk below. That walk
++		 * still applies the SIS_UTIL scan limit and can place on a
++		 * SCHED_IDLE runqueue, which this bitmap does not track.
++		 * @cpus was used as scratch above and is rebuilt here.
++		 */
++	}
++
+ 	if (!cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr))
+ 		return -1;
+ 
+@@ -8993,6 +9138,10 @@
+ 		}
+ 	}
+ 
++	/*
++	 * target, prev and recent_used_cpu already missed. select_idle_cpu()
++	 * consults the per-LLC idle bitmap before the capped linear walk.
++	 */
+ 	i = select_idle_cpu(p, sd, has_idle_core, target);
+ 	if ((unsigned)i < nr_cpumask_bits)
+ 		return i;
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -490,6 +490,7 @@
+ static void set_next_task_idle(struct rq *rq, struct task_struct *next, bool first)
+ {
+ 	update_idle_core(rq);
++	llc_idle_enter(cpu_of(rq));
+ 	scx_update_idle(rq, true, true);
+ 	schedstat_inc(rq->sched_goidle);
+ 	next->se.exec_start = rq_clock_task(rq);
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -8778,6 +8778,12 @@
+ 	set_cpu_active(cpu, false);
+ 
+ 	/*
++	 * Drop this CPU's per-LLC idle bit. Done after clearing
++	 * cpu_active so a later idle entry does not set it again.
++	 */
++	llc_idle_clear(cpu);
++
++	/*
+ 	 * From this point forward, this CPU will refuse to run any task that
+ 	 * is not: migrate_disable() or KTHREAD_IS_PER_CPU, and will actively
+ 	 * push those tasks away until this gets cleared, see
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -625,8 +625,10 @@
+ 
+ static void free_sched_domain_shared(struct sched_domain_shared *sds)
+ {
+-	if (sds && atomic_dec_and_test(&sds->ref))
++	if (sds && atomic_dec_and_test(&sds->ref)) {
++		free_cpumask_var(sds->idle_cpus);
+ 		kfree(sds);
++	}
+ }
+ 
+ static void destroy_sched_domain(struct sched_domain *sd)
+@@ -706,6 +708,15 @@
+ 	per_cpu(sd_llc_size, cpu) = size;
+ 	rcu_assign_pointer(per_cpu(sd_llc_shared, cpu), sds);
+ 
++	/*
++	 * A CPU already in the idle class does not call llc_idle_enter()
++	 * again just because the domain was rebuilt. Seed its bit. A
++	 * racing wakeup treats a stale bit as a miss.
++	 */
++	if (sds && cpumask_available(sds->idle_cpus) && idle_rq(cpu_rq(cpu)) &&
++	    !cpumask_test_cpu(cpu, sds->idle_cpus))
++		cpumask_set_cpu(cpu, sds->idle_cpus);
++
+ 	sd = lowest_flag_domain(cpu, SD_CLUSTER);
+ 	if (sd)
+ 		id = cpumask_first(sched_domain_span(sd));
+@@ -2767,6 +2778,12 @@
+ 		if (!sds)
+ 			return -ENOMEM;
+ 
++		if (!zalloc_cpumask_var_node(&sds->idle_cpus, GFP_KERNEL,
++					     cpu_to_node(j))) {
++			kfree(sds);
++			return -ENOMEM;
++		}
++
+ 		*per_cpu_ptr(d->sds, j) = sds;
+ 	}
+ 
+@@ -2780,8 +2797,14 @@
+ 	if (!d->sds)
+ 		return;
+ 
+-	for_each_cpu(j, cpu_map)
+-		kfree(*per_cpu_ptr(d->sds, j));
++	for_each_cpu(j, cpu_map) {
++		struct sched_domain_shared *sds = *per_cpu_ptr(d->sds, j);
++
++		if (!sds)
++			continue;
++		free_cpumask_var(sds->idle_cpus);
++		kfree(sds);
++	}
+ 
+ 	free_percpu(d->sds);
+ 	d->sds = NULL;

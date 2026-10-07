@@ -1,0 +1,152 @@
+Task 12 (softirq/RCU off irq-exit) — policy/in-tree PASS on stock knobs
+=======================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1×12 MiB L3)
+Measured: Tue Oct 6 2026, ~10:09-10:18 PT (= 17:09-17:18 UTC) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 12 --schedstats
+Workloads: softirq_storm (primary), networking, storage
+Every run status=ok. No patched kernel was built. Baseline tree not modified.
+
+Kernels /boot present
+  stock/defer measured on: 7.2.9-baseline (same image; A/B via boot cmdline knobs)
+  also: 7.2.9-ai-opt, 7.2.9-t3, 7.2.9-t9, 7.0.0-34-generic
+  (host returned to 7.2.9-t9; GRUB_CMDLINE_LINUX restored; no t12 image)
+
+Roadmap ask
+  "Move softirq and RCU callback storms out of irq-exit where tail latency
+   matters." Impact: Medium for tail latency; Low if nocb and RT already on.
+  Better mechanism: already config, not new code —
+     CONFIG_PREEMPT_RT threads softirq;
+     CONFIG_RCU_NOCB_CPU moves callbacks to kthreads.
+  "Always deferring costs throughput, so this is a workload choice."
+  Workload: Networking, storage.
+
+Survey — what already existed (full notes: reports/task12-survey.txt)
+  - irq_exit_rcu → __irq_exit_rcu → invoke_softirq(): on non-RT stock,
+    softirq runs INLINE (__do_softirq / own stack) unless force_irqthreads().
+  - handle_softirqs budget: MAX_SOFTIRQ_TIME=2 ms, MAX_SOFTIRQ_RESTART=10;
+    overflow wakes ksoftirqd.
+  - CONFIG_PREEMPT_RT is NOT set; CONFIG_IRQ_FORCED_THREADING=y;
+    threadirqs early_param enables force_irqthreads_key.
+  - CONFIG_RCU_NOCB_CPU=y but DEFAULT_ALL not set; stock cmdline has no
+    rcu_nocbs → no rcuo* offload.
+  - rcutree.use_softirq=Y (boot-only 0444): RCU core via RCU_SOFTIRQ on
+    the softirq/irq-exit budget; =0 uses rcuc kthreads instead.
+  - ksoftirqd/N already exist for overflow; they do not move the common
+    case off irq-exit by themselves.
+  - net.core.netdev_budget=300 / usecs=2000 are NAPI spend caps, not offload.
+
+Decision (Approach A — existing knobs)
+  Prefer measuring stock irq-exit softirq + documenting/A-B'ing boot knobs
+  over inventing a gated irq_exit rewrite. No 7.2.9-t12, no 0012-*.patch,
+  baseline tree untouched.
+
+Harness (Task 12)
+  1. New workload softirq_storm (C): timerfd storm + UDP loopback flood +
+     mmap/munmap RCU churn; 1 ms nanosleep wake-latency sampler.
+     Wrapper records /proc/softirqs deltas, ksoftirqd ms, rcuo count,
+     cmdline knobs, RCU-stall dmesg delta.
+  2. tasks.conf Task 12 → softirq_storm networking storage; primary metrics
+     expanded with softirq/RCU/wake-lat wl_*.
+  3. A/B on same 7.2.9-baseline image:
+       STOCK = no threadirqs / no rcu_nocbs / use_softirq=Y
+       DEFER = threadirqs rcu_nocbs=0-11 rcutree.use_softirq=0
+
+What was NOT done (and why)
+  - No kernel patch: roadmap says this is already config; DEFER knobs work.
+  - No CONFIG_PREEMPT_RT rebuild: different kernel flavour, not a gated
+    one-feature change for this roadmap item.
+  - No always-on default for deferral: measurements show cost, not a free win.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  STOCK — runs/BASELINE-task12-SETS.txt
+    S1  20261006T170958+0000-task12   (runs/BASELINE-task12 -> this)
+    S2  20261006T171036+0000-task12
+    S3  20261006T171115+0000-task12
+  DEFER — runs/DEFER-task12-SETS.txt
+    D1  20261006T171616+0000-task12   (runs/DEFER-task12 -> this)
+    D2  20261006T171657+0000-task12
+    D3  20261006T171737+0000-task12
+  patched: none
+
+Primary signal — softirq_storm (same binary/args every run)
+  command: build/softirq_storm -d 15 -t 4 -n 4 -r 2
+
+  metric / knob                    S1         S2         S3         D1         D2         D3
+  wl_cmdline_threadirqs           off        off        off         on         on         on
+  wl_cmdline_rcu_nocbs            off        off        off   rcu_nocbs=0-11 (same)
+  wl_rcutree_use_softirq            Y          Y          Y          N          N          N
+  wl_rcuo_kthreads                  0          0          0         15         15         15
+  wl_softirq_total_delta     20269758   20701254   20296379   19193137   18546400   19275767
+  wl_softirq_net_rx_delta    20199577   20631543   20228006   19133122   18498720   19226852
+  wl_softirq_rcu_delta          24432      23280      21297          0          0          0
+  wl_ksoftirqd_ms_delta             0          0          0        130        110         80
+  wl_wake_lat_p50_ns          1048576    1048576    1048576    1048576    1048576    1048576
+  wl_wake_lat_p99_ns          1048576    1048576    1048576    1048576    1048576    1048576
+  wl_wake_lat_max_ns          1120705    1134902    1125592    1219425    1124511    1120758
+  wl_wake_lat_avg_ns          1057544    1067638    1064903    1062776    1059689    1060084
+  wall_time_sec                  18.71      18.45      18.40      20.15      19.97      19.75
+  cycles (x1e9)                  214.6      216.8      215.8      216.1      214.7      218.2
+  ipc                            1.618      1.637      1.613      1.533      1.489      1.532
+  rq_latency_ns                    101         90         94       1456       1326       1484
+  wl_rcu_stall_lines_delta           0          0          0          0          0          0
+
+How to read (softirq_storm)
+  Softirq ON irq path (STOCK) is proven: ~20.3M softirqs / 15 s with
+  ksoftirqd_ms_delta=0 on all three STOCK runs — handlers ran inline on
+  irq-exit, not in ksoftirqd.
+  DEFER knobs do what the roadmap describes:
+    - RCU softirq delta → 0; 15 rcuo* kthreads appear (nocb offload).
+    - ksoftirqd_ms_delta → 80–130 ms (threadirqs moves softirq off inline).
+  Wake-lat p50/p99 stuck at the 1 ms nanosleep / log2 bucket — not a useful
+  placement/tail signal here. max/avg are noise-bound across arms.
+  Same-sign DEFER regressions across all 3 pairs:
+    - wall_time_sec higher (~+7–9%)
+    - ipc lower (~1.49–1.53 vs ~1.61–1.64)
+    - rq_latency_ns much higher (~1.3–1.5 us vs ~90–100 ns)
+  Softirq total count is slightly lower under DEFER (~−5 to −10%) — deferred
+  path does less inline work / different batching, not a latency win.
+  No RCU stall warnings on either arm.
+
+Secondary — networking / storage (regression context)
+  iperf3 loopback (8 s), 0 sender retransmits both arms:
+    STOCK: 76.3 / 77.0 / 78.3 Gbits/sec
+    DEFER: 77.6 / 78.6 / 76.2 Gbits/sec
+  Throughput is noise-bound; no packet-loss cliff.
+  networking/storage cycles within ~1%. storage wall identical at 8.44–8.49 s.
+  Not used as the Task 12 pass gate; confirms DEFER did not break localhost
+  networking throughput under this load.
+
+Verdict: PASS (policy / in-tree)
+  - Softirq (incl. RCU_SOFTIRQ) still runs on the irq-exit path on stock
+    7.2.9-baseline; ksoftirqd is overflow-only until threadirqs.
+  - Existing boot knobs (threadirqs, rcu_nocbs=, rcutree.use_softirq=0)
+    successfully move softirq/RCU off that path — matching the roadmap's
+    "already config, not new code" guidance.
+  - On this box under softirq_storm, DEFER does not improve wake/tail latency
+    and same-sign worsens wall time, IPC, and rq_latency. Always-on deferral
+    would be the wrong default (roadmap already warns about throughput cost).
+  - No gated kernel change is justified. Treat deferral as a workload /
+    deployment choice (RT / nocb / threadirqs), not a new default.
+  - Harness now has softirq_storm for future boxes/loads where irq-tail
+    latency might show a real win.
+
+Boot left at: 7.2.9-t9 (GRUB_CMDLINE_LINUX restored to stock; no defer
+params; confirmed live). Feature OFF = stock irq-exit softirq behavior.
+
+Artifacts:
+  reports/task12-before-after.txt
+  reports/task12-survey.txt
+  reports/task12-stock-vs-defer.compare.txt
+  runs/BASELINE-task12 → 20261006T170958+0000-task12
+  runs/DEFER-task12    → 20261006T171616+0000-task12
+  runs/BASELINE-task12-SETS.txt
+  runs/DEFER-task12-SETS.txt
+  workloads/src/softirq_storm.c
+  workloads/softirq_storm.sh
+  run-t12-orchestrate.sh / run-t12-stock-measure.sh / run-t12-defer-measure.sh
+
+Next suggestion
+  Skip Task 13 (unbound work LLC pin) and Task 14 (NUMA hint-fault) on this
+  1-LLC / 1-NUMA box (deferred). Continue with Task 15 (per-folio wait queue)
+  or Task 16 (SysV IPC leave-alone / caller migration), or wrap the remaining
+  open list after a roadmap status pass.

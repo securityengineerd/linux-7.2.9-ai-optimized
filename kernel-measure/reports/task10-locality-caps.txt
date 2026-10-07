@@ -1,0 +1,25 @@
+# Task 10 locality capability survey
+uname_r=7.2.9-baseline
+nproc=12
+numa_nodes=1
+llc_domains=1
+remote_numa=n/a (single node)
+cross_llc=n/a (single LLC)
+perf_ok=cycles
+perf_ok=instructions
+perf_ok=cache-references
+perf_ok=cache-misses
+perf_ok=LLC-load-misses
+perf_ok=llc-load-misses
+perf_ok=dTLB-load-misses
+perf_ok=dtlb-load-misses
+perf_ok=iTLB-load-misses
+perf_ok=itlb-load-misses
+perf_ok=mem_load_retired.l3_miss
+perf_ok=mem_load_retired.l3_hit
+perf_ok=longest_lat_cache.miss
+perf_ok=context-switches
+perf_ok=cpu-migrations
+schedstat=present
+psi=present
+numa_balancing=0

@@ -1,0 +1,5 @@
+source=/home/kernelmaster/kernel-measure/workloads/src/folio_wait.c
+source_sha256=eb586ccda5cce6a0ff0774129c73fa9513e10d00dc044b0e7fc9dc14918f1545
+compiler=cc
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+built=2026-10-06T17:27:29+0000

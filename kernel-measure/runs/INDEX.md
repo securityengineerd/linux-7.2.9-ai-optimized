@@ -1,0 +1,427 @@
+# Run inventory (server /home/kernelmaster/kernel-measure/runs)
+
+Generated from server listing. Raw perf artifacts omitted from repo staging; see reports/ for before-after summaries.
+
+## BASELINE / named set pointers
+- `BASELINE` → `20261004T225740+0000-set`
+- `BASELINE-llc-idle` → `20261004T220137+0000-set`
+- `BASELINE-task1` → `20261005T032835+0000-task1`
+- `BASELINE-task10/` (directory)
+  - SETS.txt:
+    kernel=7.2.9-baseline
+    host=ns1021128
+    n=3
+    S1=runs/20261006T164408+0000-task10
+    S2=runs/20261006T164502+0000-task10
+    S3=runs/20261006T164557+0000-task10
+  - `S1` → `20261006T164408+0000-task10`
+  - `S1link` → `../20261006T164408+0000-task10`
+  - `first` → `../20261006T164408+0000-task10`
+- `BASELINE-task11` → `20261006T165510+0000-task11`
+- `BASELINE-task11-SETS.txt` (file):
+  # Task 11 stock UTIL_EST=ON on 7.2.9-baseline
+  # Measured Tue Oct 6 2026 ~09:55-09:57 PT (16:55-16:57 UTC)
+  S1 20261006T165510+0000-task11
+  S2 20261006T165558+0000-task11
+  S3 20261006T165647+0000-task11
+  BASELINE-task11 -> 20261006T165510+0000-task11
+- `BASELINE-task12` → `20261006T170958+0000-task12`
+- `BASELINE-task12-SETS.txt` (file):
+  # STOCK arm Task 12 — no threadirqs / no rcu_nocbs / use_softirq=Y
+  # recorded 2026-10-06T17:11:53Z uname=7.2.9-baseline
+  runs/20261006T171115+0000-task12
+  runs/20261006T171036+0000-task12
+  runs/20261006T170958+0000-task12
+- `BASELINE-task15` → `20261006T173224+0000-task15`
+- `BASELINE-task15-SETS.txt` (file):
+  /home/kernelmaster/kernel-measure/runs/20261006T173224+0000-task15
+  /home/kernelmaster/kernel-measure/runs/20261006T173253+0000-task15
+  /home/kernelmaster/kernel-measure/runs/20261006T173322+0000-task15
+- `BASELINE-task2` → `20261005T145432+0000-task2`
+- `BASELINE-task3` → `20261006T023447+0000-task3`
+- `BASELINE-task4` → `20261006T040504+0000-task4`
+- `BASELINE-task5` → `20261006T041428+0000-task5`
+- `BASELINE-task6` → `20261006T155737+0000-task6`
+- `BASELINE-task7` → `ALWAYS-task7`
+- `BASELINE-task8/` (directory)
+  - SETS.txt:
+    /home/kernelmaster/kernel-measure/runs/20261006T163256+0000-task8
+    /home/kernelmaster/kernel-measure/runs/20261006T163309+0000-task8
+    /home/kernelmaster/kernel-measure/runs/20261006T163322+0000-task8
+  - `20261006T163256+0000-task8` → `../20261006T163256+0000-task8`
+  - `20261006T163309+0000-task8` → `../20261006T163309+0000-task8`
+  - `20261006T163322+0000-task8` → `../20261006T163322+0000-task8`
+- `BASELINE-task9` → `20261006T033329+0000-task9`
+- `ALWAYS-task7/` (directory)
+  - SETS.txt:
+    runs/20261006T161806+0000-task7
+    runs/20261006T161818+0000-task7
+    runs/20261006T161829+0000-task7
+  - `20261006T161806+0000-task7` → `../20261006T161806+0000-task7`
+  - `20261006T161818+0000-task7` → `../20261006T161818+0000-task7`
+  - `20261006T161829+0000-task7` → `../20261006T161829+0000-task7`
+- `DEFER-task12` → `20261006T171616+0000-task12`
+- `DEFER-task12-SETS.txt` (file):
+  # DEFER arm Task 12 — threadirqs rcu_nocbs=0-11 rcutree.use_softirq=0
+  # recorded 2026-10-06T17:18:16Z uname=7.2.9-baseline
+  runs/20261006T171737+0000-task12
+  runs/20261006T171657+0000-task12
+  runs/20261006T171616+0000-task12
+- `DEFER-task7/` (directory)
+  - SETS.txt:
+    runs/20261006T161841+0000-task7
+    runs/20261006T161853+0000-task7
+    runs/20261006T161904+0000-task7
+  - `20261006T161841+0000-task7` → `../20261006T161841+0000-task7`
+  - `20261006T161853+0000-task7` → `../20261006T161853+0000-task7`
+  - `20261006T161904+0000-task7` → `../20261006T161904+0000-task7`
+- `NOUTIL-task11` → `20261006T165735+0000-task11`
+- `NOUTIL-task11-SETS.txt` (file):
+  # Task 11 stock UTIL_EST=OFF (debugfs NO_UTIL_EST) on 7.2.9-baseline
+  # Measured Tue Oct 6 2026 ~09:57-09:59 PT (16:57-16:59 UTC)
+  S1 20261006T165735+0000-task11
+  S2 20261006T165823+0000-task11
+  S3 20261006T165912+0000-task11
+  NOUTIL-task11 -> 20261006T165735+0000-task11
+- `PARTIAL-task8/` (directory)
+  - SETS.txt:
+    /home/kernelmaster/kernel-measure/runs/20261006T163256+0000-task8
+    /home/kernelmaster/kernel-measure/runs/20261006T163309+0000-task8
+    /home/kernelmaster/kernel-measure/runs/20261006T163322+0000-task8
+  - `20261006T163256+0000-task8` → `../20261006T163256+0000-task8`
+  - `20261006T163309+0000-task8` → `../20261006T163309+0000-task8`
+  - `20261006T163322+0000-task8` → `../20261006T163322+0000-task8`
+- `SWAPFB-task8/` (directory)
+  - SETS.txt:
+    /home/kernelmaster/kernel-measure/runs/20261006T163420+0000-task8
+  - `20261006T163420+0000-task8` → `../20261006T163420+0000-task8`
+- `UNDERUSED-task8/` (directory)
+  - SETS.txt:
+    /home/kernelmaster/kernel-measure/runs/20261006T163342+0000-task8
+    /home/kernelmaster/kernel-measure/runs/20261006T163355+0000-task8
+    /home/kernelmaster/kernel-measure/runs/20261006T163408+0000-task8
+  - `20261006T163342+0000-task8` → `../20261006T163342+0000-task8`
+  - `20261006T163355+0000-task8` → `../20261006T163355+0000-task8`
+  - `20261006T163408+0000-task8` → `../20261006T163408+0000-task8`
+
+## All run directories / symlinks (ids)
+- `20261004T220137+0000-containers` → `20261004T220137+0000-set/containers`
+- `20261004T220137+0000-database` → `20261004T220137+0000-set/database`
+- `20261004T220137+0000-general` → `20261004T220137+0000-set/general`
+- `20261004T220137+0000-networking` → `20261004T220137+0000-set/networking`
+- `20261004T220137+0000-set/`
+- `20261004T220137+0000-storage` → `20261004T220137+0000-set/storage`
+- `20261004T220137+0000-virtualization` → `20261004T220137+0000-set/virtualization`
+- `20261004T225740+0000-containers` → `20261004T225740+0000-set/containers`
+- `20261004T225740+0000-database` → `20261004T225740+0000-set/database`
+- `20261004T225740+0000-general` → `20261004T225740+0000-set/general`
+- `20261004T225740+0000-networking` → `20261004T225740+0000-set/networking`
+- `20261004T225740+0000-set/`
+- `20261004T225740+0000-storage` → `20261004T225740+0000-set/storage`
+- `20261004T225740+0000-virtualization` → `20261004T225740+0000-set/virtualization`
+- `20261005T031602+0000-containers` → `20261005T031602+0000-set/containers`
+- `20261005T031602+0000-database` → `20261005T031602+0000-set/database`
+- `20261005T031602+0000-general` → `20261005T031602+0000-set/general`
+- `20261005T031602+0000-networking` → `20261005T031602+0000-set/networking`
+- `20261005T031602+0000-set/`
+- `20261005T031602+0000-storage` → `20261005T031602+0000-set/storage`
+- `20261005T031602+0000-virtualization` → `20261005T031602+0000-set/virtualization`
+- `20261005T032835+0000-general` → `20261005T032835+0000-task1/general`
+- `20261005T032835+0000-task1/`
+- `20261005T032835+0000-wake_llc` → `20261005T032835+0000-task1/wake_llc`
+- `20261005T032918+0000-general` → `20261005T032918+0000-task1/general`
+- `20261005T032918+0000-task1/`
+- `20261005T032918+0000-wake_llc` → `20261005T032918+0000-task1/wake_llc`
+- `20261005T032954+0000-general` → `20261005T032954+0000-task1/general`
+- `20261005T032954+0000-task1/`
+- `20261005T032954+0000-wake_llc` → `20261005T032954+0000-task1/wake_llc`
+- `20261005T033314+0000-general` → `20261005T033314+0000-task1/general`
+- `20261005T033314+0000-task1/`
+- `20261005T033314+0000-wake_llc` → `20261005T033314+0000-task1/wake_llc`
+- `20261005T033351+0000-general` → `20261005T033351+0000-task1/general`
+- `20261005T033351+0000-task1/`
+- `20261005T033351+0000-wake_llc` → `20261005T033351+0000-task1/wake_llc`
+- `20261005T033428+0000-general` → `20261005T033428+0000-task1/general`
+- `20261005T033428+0000-task1/`
+- `20261005T033428+0000-wake_llc` → `20261005T033428+0000-task1/wake_llc`
+- `20261005T092710+0000-general` → `20261005T092710+0000-task1/general`
+- `20261005T092710+0000-task1/`
+- `20261005T092710+0000-wake_llc` → `20261005T092710+0000-task1/wake_llc`
+- `20261005T092742+0000-general` → `20261005T092742+0000-task1/general`
+- `20261005T092742+0000-task1/`
+- `20261005T092742+0000-wake_llc` → `20261005T092742+0000-task1/wake_llc`
+- `20261005T092814+0000-general` → `20261005T092814+0000-task1/general`
+- `20261005T092814+0000-task1/`
+- `20261005T092814+0000-wake_llc` → `20261005T092814+0000-task1/wake_llc`
+- `20261005T124727+0000-general` → `20261005T124727+0000-task2/general`
+- `20261005T124727+0000-migrate_load` → `20261005T124727+0000-task2/migrate_load`
+- `20261005T124727+0000-task2/`
+- `20261005T124758+0000-general` → `20261005T124758+0000-task2/general`
+- `20261005T124758+0000-migrate_load` → `20261005T124758+0000-task2/migrate_load`
+- `20261005T124758+0000-task2/`
+- `20261005T124828+0000-general` → `20261005T124828+0000-task2/general`
+- `20261005T124828+0000-migrate_load` → `20261005T124828+0000-task2/migrate_load`
+- `20261005T124828+0000-task2/`
+- `20261005T145432+0000-general` → `20261005T145432+0000-task2/general`
+- `20261005T145432+0000-migrate_load` → `20261005T145432+0000-task2/migrate_load`
+- `20261005T145432+0000-task2/`
+- `20261005T145503+0000-general` → `20261005T145503+0000-task2/general`
+- `20261005T145503+0000-migrate_load` → `20261005T145503+0000-task2/migrate_load`
+- `20261005T145503+0000-task2/`
+- `20261005T145533+0000-general` → `20261005T145533+0000-task2/general`
+- `20261005T145533+0000-migrate_load` → `20261005T145533+0000-task2/migrate_load`
+- `20261005T145533+0000-task2/`
+- `20261006T023213+0000-cgroup_cpu` → `20261006T023213+0000-task3/cgroup_cpu`
+- `20261006T023213+0000-general` → `20261006T023213+0000-task3/general`
+- `20261006T023213+0000-task3/`
+- `20261006T023252+0000-cgroup_cpu` → `20261006T023252+0000-task3/cgroup_cpu`
+- `20261006T023252+0000-general` → `20261006T023252+0000-task3/general`
+- `20261006T023252+0000-task3/`
+- `20261006T023330+0000-cgroup_cpu` → `20261006T023330+0000-task3/cgroup_cpu`
+- `20261006T023330+0000-general` → `20261006T023330+0000-task3/general`
+- `20261006T023330+0000-task3/`
+- `20261006T023447+0000-cgroup_cpu` → `20261006T023447+0000-task3/cgroup_cpu`
+- `20261006T023447+0000-general` → `20261006T023447+0000-task3/general`
+- `20261006T023447+0000-task3/`
+- `20261006T023526+0000-cgroup_cpu` → `20261006T023526+0000-task3/cgroup_cpu`
+- `20261006T023526+0000-general` → `20261006T023526+0000-task3/general`
+- `20261006T023526+0000-task3/`
+- `20261006T023604+0000-cgroup_cpu` → `20261006T023604+0000-task3/cgroup_cpu`
+- `20261006T023604+0000-general` → `20261006T023604+0000-task3/general`
+- `20261006T023604+0000-task3/`
+- `20261006T030330+0000-cgroup_cpu` → `20261006T030330+0000-task3/cgroup_cpu`
+- `20261006T030330+0000-general` → `20261006T030330+0000-task3/general`
+- `20261006T030330+0000-task3/`
+- `20261006T030409+0000-cgroup_cpu` → `20261006T030409+0000-task3/cgroup_cpu`
+- `20261006T030409+0000-general` → `20261006T030409+0000-task3/general`
+- `20261006T030409+0000-task3/`
+- `20261006T030447+0000-cgroup_cpu` → `20261006T030447+0000-task3/cgroup_cpu`
+- `20261006T030447+0000-general` → `20261006T030447+0000-task3/general`
+- `20261006T030447+0000-task3/`
+- `20261006T033329+0000-io_uring_submit` → `20261006T033329+0000-task9/io_uring_submit`
+- `20261006T033329+0000-task9/`
+- `20261006T033342+0000-io_uring_submit` → `20261006T033342+0000-task9/io_uring_submit`
+- `20261006T033342+0000-task9/`
+- `20261006T033355+0000-io_uring_submit` → `20261006T033355+0000-task9/io_uring_submit`
+- `20261006T033355+0000-task9/`
+- `20261006T035623+0000-io_uring_submit` → `20261006T035623+0000-task9/io_uring_submit`
+- `20261006T035623+0000-task9/`
+- `20261006T035636+0000-io_uring_submit` → `20261006T035636+0000-task9/io_uring_submit`
+- `20261006T035636+0000-task9/`
+- `20261006T035649+0000-io_uring_submit` → `20261006T035649+0000-task9/io_uring_submit`
+- `20261006T035649+0000-task9/`
+- `20261006T040504+0000-task4/`
+- `20261006T040504+0000-tcp_recv_zc` → `20261006T040504+0000-task4/tcp_recv_zc`
+- `20261006T040515+0000-task4/`
+- `20261006T040515+0000-tcp_recv_zc` → `20261006T040515+0000-task4/tcp_recv_zc`
+- `20261006T040526+0000-task4/`
+- `20261006T040526+0000-tcp_recv_zc` → `20261006T040526+0000-task4/tcp_recv_zc`
+- `20261006T041428+0000-hot_read` → `20261006T041428+0000-task5/hot_read`
+- `20261006T041428+0000-task5/`
+- `20261006T041434+0000-hot_read` → `20261006T041434+0000-task5/hot_read`
+- `20261006T041434+0000-task5/`
+- `20261006T041440+0000-hot_read` → `20261006T041440+0000-task5/hot_read`
+- `20261006T041440+0000-task5/`
+- `20261006T155737+0000-anon_fault` → `20261006T155737+0000-task6/anon_fault`
+- `20261006T155737+0000-task6/`
+- `20261006T155739+0000-anon_fault` → `20261006T155739+0000-task6/anon_fault`
+- `20261006T155739+0000-task6/`
+- `20261006T155741+0000-anon_fault` → `20261006T155741+0000-task6/anon_fault`
+- `20261006T155741+0000-task6/`
+- `20261006T161228+0000-mem_pressure` → `20261006T161228+0000-task7/mem_pressure`
+- `20261006T161228+0000-task7/`
+- `20261006T161241+0000-mem_pressure` → `20261006T161241+0000-task7/mem_pressure`
+- `20261006T161241+0000-task7/`
+- `20261006T161254+0000-mem_pressure` → `20261006T161254+0000-task7/mem_pressure`
+- `20261006T161254+0000-task7/`
+- `20261006T161307+0000-mem_pressure` → `20261006T161307+0000-task7/mem_pressure`
+- `20261006T161307+0000-task7/`
+- `20261006T161321+0000-mem_pressure` → `20261006T161321+0000-task7/mem_pressure`
+- `20261006T161321+0000-task7/`
+- `20261006T161334+0000-mem_pressure` → `20261006T161334+0000-task7/mem_pressure`
+- `20261006T161334+0000-task7/`
+- `20261006T161414+0000-mem_pressure` → `20261006T161414+0000-task7/mem_pressure`
+- `20261006T161414+0000-task7/`
+- `20261006T161426+0000-mem_pressure` → `20261006T161426+0000-task7/mem_pressure`
+- `20261006T161426+0000-task7/`
+- `20261006T161439+0000-mem_pressure` → `20261006T161439+0000-task7/mem_pressure`
+- `20261006T161439+0000-task7/`
+- `20261006T161451+0000-mem_pressure` → `20261006T161451+0000-task7/mem_pressure`
+- `20261006T161451+0000-task7/`
+- `20261006T161503+0000-mem_pressure` → `20261006T161503+0000-task7/mem_pressure`
+- `20261006T161503+0000-task7/`
+- `20261006T161516+0000-mem_pressure` → `20261006T161516+0000-task7/mem_pressure`
+- `20261006T161516+0000-task7/`
+- `20261006T161806+0000-mem_pressure` → `20261006T161806+0000-task7/mem_pressure`
+- `20261006T161806+0000-task7/`
+- `20261006T161818+0000-mem_pressure` → `20261006T161818+0000-task7/mem_pressure`
+- `20261006T161818+0000-task7/`
+- `20261006T161829+0000-mem_pressure` → `20261006T161829+0000-task7/mem_pressure`
+- `20261006T161829+0000-task7/`
+- `20261006T161841+0000-mem_pressure` → `20261006T161841+0000-task7/mem_pressure`
+- `20261006T161841+0000-task7/`
+- `20261006T161853+0000-mem_pressure` → `20261006T161853+0000-task7/mem_pressure`
+- `20261006T161853+0000-task7/`
+- `20261006T161904+0000-mem_pressure` → `20261006T161904+0000-task7/mem_pressure`
+- `20261006T161904+0000-task7/`
+- `20261006T163256+0000-folio_split` → `20261006T163256+0000-task8/folio_split`
+- `20261006T163256+0000-task8/`
+- `20261006T163309+0000-folio_split` → `20261006T163309+0000-task8/folio_split`
+- `20261006T163309+0000-task8/`
+- `20261006T163322+0000-folio_split` → `20261006T163322+0000-task8/folio_split`
+- `20261006T163322+0000-task8/`
+- `20261006T163342+0000-folio_split` → `20261006T163342+0000-task8/folio_split`
+- `20261006T163342+0000-task8/`
+- `20261006T163355+0000-folio_split` → `20261006T163355+0000-task8/folio_split`
+- `20261006T163355+0000-task8/`
+- `20261006T163408+0000-folio_split` → `20261006T163408+0000-task8/folio_split`
+- `20261006T163408+0000-task8/`
+- `20261006T163420+0000-folio_split` → `20261006T163420+0000-task8/folio_split`
+- `20261006T163420+0000-task8/`
+- `20261006T164027+0000-database` → `20261006T164027+0000-task10/database`
+- `20261006T164027+0000-general` → `20261006T164027+0000-task10/general`
+- `20261006T164027+0000-migrate_load` → `20261006T164027+0000-task10/migrate_load`
+- `20261006T164027+0000-task10/`
+- `20261006T164027+0000-wake_llc` → `20261006T164027+0000-task10/wake_llc`
+- `20261006T164408+0000-database` → `20261006T164408+0000-task10/database`
+- `20261006T164408+0000-general` → `20261006T164408+0000-task10/general`
+- `20261006T164408+0000-migrate_load` → `20261006T164408+0000-task10/migrate_load`
+- `20261006T164408+0000-task10/`
+- `20261006T164408+0000-wake_llc` → `20261006T164408+0000-task10/wake_llc`
+- `20261006T164502+0000-database` → `20261006T164502+0000-task10/database`
+- `20261006T164502+0000-general` → `20261006T164502+0000-task10/general`
+- `20261006T164502+0000-migrate_load` → `20261006T164502+0000-task10/migrate_load`
+- `20261006T164502+0000-task10/`
+- `20261006T164502+0000-wake_llc` → `20261006T164502+0000-task10/wake_llc`
+- `20261006T164557+0000-database` → `20261006T164557+0000-task10/database`
+- `20261006T164557+0000-general` → `20261006T164557+0000-task10/general`
+- `20261006T164557+0000-migrate_load` → `20261006T164557+0000-task10/migrate_load`
+- `20261006T164557+0000-task10/`
+- `20261006T164557+0000-wake_llc` → `20261006T164557+0000-task10/wake_llc`
+- `20261006T165510+0000-general` → `20261006T165510+0000-task11/general`
+- `20261006T165510+0000-task11/`
+- `20261006T165510+0000-util_est_burst` → `20261006T165510+0000-task11/util_est_burst`
+- `20261006T165510+0000-wake_llc` → `20261006T165510+0000-task11/wake_llc`
+- `20261006T165558+0000-general` → `20261006T165558+0000-task11/general`
+- `20261006T165558+0000-task11/`
+- `20261006T165558+0000-util_est_burst` → `20261006T165558+0000-task11/util_est_burst`
+- `20261006T165558+0000-wake_llc` → `20261006T165558+0000-task11/wake_llc`
+- `20261006T165647+0000-general` → `20261006T165647+0000-task11/general`
+- `20261006T165647+0000-task11/`
+- `20261006T165647+0000-util_est_burst` → `20261006T165647+0000-task11/util_est_burst`
+- `20261006T165647+0000-wake_llc` → `20261006T165647+0000-task11/wake_llc`
+- `20261006T165735+0000-general` → `20261006T165735+0000-task11/general`
+- `20261006T165735+0000-task11/`
+- `20261006T165735+0000-util_est_burst` → `20261006T165735+0000-task11/util_est_burst`
+- `20261006T165735+0000-wake_llc` → `20261006T165735+0000-task11/wake_llc`
+- `20261006T165823+0000-general` → `20261006T165823+0000-task11/general`
+- `20261006T165823+0000-task11/`
+- `20261006T165823+0000-util_est_burst` → `20261006T165823+0000-task11/util_est_burst`
+- `20261006T165823+0000-wake_llc` → `20261006T165823+0000-task11/wake_llc`
+- `20261006T165912+0000-general` → `20261006T165912+0000-task11/general`
+- `20261006T165912+0000-task11/`
+- `20261006T165912+0000-util_est_burst` → `20261006T165912+0000-task11/util_est_burst`
+- `20261006T165912+0000-wake_llc` → `20261006T165912+0000-task11/wake_llc`
+- `20261006T170609+0000-softirq_storm/`
+- `20261006T170958+0000-networking` → `20261006T170958+0000-task12/networking`
+- `20261006T170958+0000-softirq_storm` → `20261006T170958+0000-task12/softirq_storm`
+- `20261006T170958+0000-storage` → `20261006T170958+0000-task12/storage`
+- `20261006T170958+0000-task12/`
+- `20261006T171036+0000-networking` → `20261006T171036+0000-task12/networking`
+- `20261006T171036+0000-softirq_storm` → `20261006T171036+0000-task12/softirq_storm`
+- `20261006T171036+0000-storage` → `20261006T171036+0000-task12/storage`
+- `20261006T171036+0000-task12/`
+- `20261006T171115+0000-networking` → `20261006T171115+0000-task12/networking`
+- `20261006T171115+0000-softirq_storm` → `20261006T171115+0000-task12/softirq_storm`
+- `20261006T171115+0000-storage` → `20261006T171115+0000-task12/storage`
+- `20261006T171115+0000-task12/`
+- `20261006T171616+0000-networking` → `20261006T171616+0000-task12/networking`
+- `20261006T171616+0000-softirq_storm` → `20261006T171616+0000-task12/softirq_storm`
+- `20261006T171616+0000-storage` → `20261006T171616+0000-task12/storage`
+- `20261006T171616+0000-task12/`
+- `20261006T171657+0000-networking` → `20261006T171657+0000-task12/networking`
+- `20261006T171657+0000-softirq_storm` → `20261006T171657+0000-task12/softirq_storm`
+- `20261006T171657+0000-storage` → `20261006T171657+0000-task12/storage`
+- `20261006T171657+0000-task12/`
+- `20261006T171737+0000-networking` → `20261006T171737+0000-task12/networking`
+- `20261006T171737+0000-softirq_storm` → `20261006T171737+0000-task12/softirq_storm`
+- `20261006T171737+0000-storage` → `20261006T171737+0000-task12/storage`
+- `20261006T171737+0000-task12/`
+- `20261006T173054+0000-task15/`
+- `20261006T173224+0000-database` → `20261006T173224+0000-task15/database`
+- `20261006T173224+0000-folio_wait` → `20261006T173224+0000-task15/folio_wait`
+- `20261006T173224+0000-storage` → `20261006T173224+0000-task15/storage`
+- `20261006T173224+0000-task15/`
+- `20261006T173253+0000-database` → `20261006T173253+0000-task15/database`
+- `20261006T173253+0000-folio_wait` → `20261006T173253+0000-task15/folio_wait`
+- `20261006T173253+0000-storage` → `20261006T173253+0000-task15/storage`
+- `20261006T173253+0000-task15/`
+- `20261006T173322+0000-database` → `20261006T173322+0000-task15/database`
+- `20261006T173322+0000-folio_wait` → `20261006T173322+0000-task15/folio_wait`
+- `20261006T173322+0000-storage` → `20261006T173322+0000-task15/storage`
+- `20261006T173322+0000-task15/`
+- `20261006T173352+0000-database` → `20261006T173352+0000-task15/database`
+- `20261006T173352+0000-folio_wait` → `20261006T173352+0000-task15/folio_wait`
+- `20261006T173352+0000-storage` → `20261006T173352+0000-task15/storage`
+- `20261006T173352+0000-task15/`
+- `20261006T173420+0000-database` → `20261006T173420+0000-task15/database`
+- `20261006T173420+0000-folio_wait` → `20261006T173420+0000-task15/folio_wait`
+- `20261006T173420+0000-storage` → `20261006T173420+0000-task15/storage`
+- `20261006T173420+0000-task15/`
+- `20261006T173505+0000-folio_wait/`
+- `20261006T173526+0000-folio_wait/`
+- `ALWAYS-task7/`
+- `BASELINE` → `20261004T225740+0000-set`
+- `BASELINE-llc-idle` → `20261004T220137+0000-set`
+- `BASELINE-task1` → `20261005T032835+0000-task1`
+- `BASELINE-task10/`
+- `BASELINE-task11` → `20261006T165510+0000-task11`
+- `BASELINE-task11-SETS.txt` (file)
+- `BASELINE-task12` → `20261006T170958+0000-task12`
+- `BASELINE-task12-SETS.txt` (file)
+- `BASELINE-task15` → `20261006T173224+0000-task15`
+- `BASELINE-task15-SETS.txt` (file)
+- `BASELINE-task2` → `20261005T145432+0000-task2`
+- `BASELINE-task3` → `20261006T023447+0000-task3`
+- `BASELINE-task4` → `20261006T040504+0000-task4`
+- `BASELINE-task5` → `20261006T041428+0000-task5`
+- `BASELINE-task6` → `20261006T155737+0000-task6`
+- `BASELINE-task7` → `ALWAYS-task7`
+- `BASELINE-task8/`
+- `BASELINE-task9` → `20261006T033329+0000-task9`
+- `DEFER-task12` → `20261006T171616+0000-task12`
+- `DEFER-task12-SETS.txt` (file)
+- `DEFER-task7/`
+- `HIGHCOLL-task15` → `20261006T173352+0000-task15`
+- `HIGHCOLL-task15-folio` → `20261006T173505+0000-folio_wait`
+- `LAST_RUN` (file)
+- `LAST_SET` (file)
+- `LAST_TASK1` (file)
+- `LAST_TASK10` (file)
+- `LAST_TASK11` → `NOUTIL-task11`
+- `LAST_TASK11_NOTE.txt` (file)
+- `LAST_TASK12` (file)
+- `LAST_TASK15` (file)
+- `LAST_TASK2` (file)
+- `LAST_TASK3` (file)
+- `LAST_TASK4` (file)
+- `LAST_TASK5` (file)
+- `LAST_TASK6` → `BASELINE-task6`
+- `LAST_TASK7` (file)
+- `LAST_TASK8` (file)
+- `LAST_TASK9` (file)
+- `LOWCOLL-task15` → `20261006T173420+0000-task15`
+- `LOWCOLL-task15-folio` → `20261006T173526+0000-folio_wait`
+- `NOUTIL-task11` → `20261006T165735+0000-task11`
+- `NOUTIL-task11-SETS.txt` (file)
+- `PARTIAL-task8/`
+- `SWAPFB-task8/`
+- `UNDERUSED-task8/`
+- `compare-task1-before-after/`
+- `compare-task1-v2/`
+- `compare-task10/`
+- `compare-task2/`
+- `compare-task3/`
+- `compare-task9/`
+- `smoke-wake_llc/`
+- `task7-contaminated/`

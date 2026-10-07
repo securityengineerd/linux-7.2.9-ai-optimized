@@ -1,0 +1,105 @@
+Task 15 (hashed folio wait table / per-folio wait queue) — leave hashed table
+==============================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1×12 MiB L3)
+Measured: Tue Oct 6 2026, 10:32–10:35 PT (= 17:32–17:35 UTC) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 15 --schedstats
+Workloads: folio_wait (primary), database, storage
+Every formal run status=ok. No patched kernel. Baseline tree not modified.
+
+Kernels /boot present
+  measured: 7.2.9-baseline
+  also    : 7.2.9-t9, 7.2.9-t3, 7.2.9-ai-opt, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after measure; no t15 image installed)
+
+Roadmap ask
+  "Replace the hashed folio wait table where collisions herd."
+  Impact: Medium, only where many unrelated folios block at once.
+  What exists: folio waiters share 256 hashed queues (folio_wait_table in
+  mm/filemap.c). Comment: intentional space vs thundering-herd tradeoff.
+  Better mechanism named: a per-folio wait queue (costs a spinlock on every folio).
+  Workload: Database, storage.
+
+Survey (full notes: reports/task15-survey.txt)
+  PAGE_WAIT_TABLE_BITS=8 → 256 wait_queue_head_t buckets.
+  folio_waitqueue(folio) = &folio_wait_table[hash_ptr(folio, 8)].
+  wake_page_function() already filters with wake_page_match() — unrelated
+  waiters on the same bucket are walked under the bucket spinlock but are
+  NOT woken. Classic false-wakeup herd is filtered; remaining collision cost
+  is shared spinlock contention + walking foreign wait entries.
+  struct folio has no embedded wait_queue_head_t; layout is page-union
+  constrained. Existing knob vm.page_lock_unfairness=5 is lock-steal only,
+  not a wait-table size knob.
+
+Decision (Approach A — measure stock; no gated per-folio WQ)
+  A real per-folio wait queue is a structural folio-size tax the roadmap
+  itself flags. Ship it only if collision-stress measurement shows a clear
+  same-sign herd win. Measurements do not.
+
+Harness (Task 15)
+  1. New workload folio_wait (C): many files × threads, write+fdatasync
+     (modes: writeback / mixed / lockwait). Files partitioned per worker
+     (avoids EMFILE). Reports wl_folio_wait_ops_per_sec, lat p50/p99,
+     errors, vmstat dirty/writeback deltas.
+  2. tasks.conf Task 15 → folio_wait database storage.
+  3. Collision contrast on same baseline image:
+       HIGH = FOLIOWAIT_NFILES=1024 (more unique folios → more bucket sharing)
+       LOW  = FOLIOWAIT_NFILES=12   (few folios → less cross-folio sharing)
+
+What was NOT done (and why)
+  - No 7.2.9-t15 / 0015-*.patch: no measured herd win to justify per-folio WQ.
+  - No PAGE_WAIT_TABLE_BITS bump: different mechanism than roadmap; still
+    unjustified without a collision signal above storage noise.
+  - Baseline tree untouched.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  STOCK 3× (nfiles=512) — runs/BASELINE-task15-SETS.txt
+    B1  20261006T173224+0000-task15   (runs/BASELINE-task15 -> this)
+    B2  20261006T173253+0000-task15
+    B3  20261006T173322+0000-task15
+  HIGHCOLL contrast (folio_wait only): runs/HIGHCOLL-task15-folio
+    → 20261006T173505+0000-folio_wait  (nfiles=1024)
+  LOWCOLL contrast (folio_wait only):  runs/LOWCOLL-task15-folio
+    → 20261006T173526+0000-folio_wait  (nfiles=12)
+  patched: none
+  (earlier HIGHCOLL-task15 / LOWCOLL-task15 symlinks were full --task 15
+   runs where workloads.conf overwrote NFILES=512; superseded by *-folio)
+
+Primary signal — folio_wait writeback (ext4, 12 threads, file_kb=64, chunk=4k)
+
+  metric                         B1         B2         B3       HIGH      LOW
+  wl_folio_wait_nfiles          512        512        512       1024       12
+  wl_folio_wait_ops_per_sec   2228.47    2192.41    2106.14    2290.54   2147.29
+  wl_folio_wait_lat_p50_ns    2097152    4194304    4194304    4194304   4194304
+  wl_folio_wait_lat_p99_ns    8388608    8388608    8388608    8388608   8388608
+  wl_folio_wait_errors            0          0          0          0        0
+  wall_time_sec                 16.95      17.19      17.20      19.38     15.16
+  cycles (x1e9)                  6.65       6.41       6.19       6.98      6.03
+  ipc                           0.301      0.309      0.317      0.325     0.290
+
+How to read
+  Stock 3× ops/s spread ≈ 5.5% (2106–2228) — that is the noise floor on this
+  disk-bound fdatasync path (p50 ~2–4 ms, p99 8 ms; log2 latency buckets).
+  HIGH (1024 files) vs LOW (12 files): ops/s +6.7% for HIGH, same p50/p99
+  bucket. That is inside/at stock noise and the wrong sign for a "collision
+  herd hurts" story (more unique folios did not slow wait completion).
+  Path is exercised: errors=0, pgpgout moves, wait latencies are real
+  writeback waits — not a no-op harness.
+
+Secondary — database / storage (regression context only)
+  B1–B3 database wall ~0.05 s (sqlite quick path); storage wall ~8.46–8.50 s,
+  cycles ~36.6–36.8e9, ipc ~1.42. Stable. Not the Task 15 pass gate.
+
+Verdict: PASS (leave-alone / measured)
+  Keep the hashed folio_wait_table. wake_page_match already prevents classic
+  false wakeups; remaining bucket-walk cost is not visible above storage
+  latency on this host under a many-unrelated-folio writeback storm.
+  A per-folio wait queue remains a space tax without a proven efficiency win
+  here. No kernel patch. No default change.
+
+Boot left at: 7.2.9-t9 (stock cmdline; no Task 15 knobs).
+
+Paths
+  Report:  /home/kernelmaster/kernel-measure/reports/task15-before-after.txt
+           /workspace/kernel-measure/reports/task15-before-after.txt
+  Survey:  reports/task15-survey.txt
+  Workload: workloads/src/folio_wait.c, workloads/folio_wait.sh

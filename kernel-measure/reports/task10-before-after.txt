@@ -1,0 +1,158 @@
+Task 10 (cache-miss / LLC / NUMA locality accounting) — harness PASS on stock
+==============================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1×12 MiB L3)
+Stock measured: Tue Oct 6 2026, 09:44-09:46 PT (= 16:44-16:46 UTC) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 10 --schedstats
+Workloads: wake_llc, migrate_load, general, database (tasks.conf Task 10)
+Every run status=ok. No patched kernel was built. Baseline tree not modified.
+
+Kernels /boot present
+  stock   : 7.2.9-baseline (measured)
+  also    : 7.2.9-ai-opt, 7.2.9-t3, 7.2.9-t9, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after stock measure; no t10 image installed)
+
+Roadmap ask
+  "Account for cache misses, not only CPU time." Record LLC misses and NUMA
+  locality next to CPU time on locality tasks. Accounting task, not a new
+  scheduler.
+
+Survey — what already existed
+  - collect.sh already probed cycles, instructions, cache-references,
+    cache-misses, LLC-load-misses, dTLB/iTLB-load-misses, context-switches,
+    cpu-migrations; wrote cache_misses / cache_misses_per_kinstr into
+    metrics.env; schedstat ttwu_local/remote with --schedstats; vmstat
+    numa_hint_faults_delta.
+  - Prior runs on this box left llc_load_misses=n/a and tlb_misses=n/a with
+    perf_dropped=LLC-load-misses,dTLB-load-misses,iTLB-load-misses.
+  - Root cause (Task 10 finding): probe_perf matched perf list with a
+    case-sensitive grep. On this CPU perf list prints lowercase
+    llc-load-misses / dtlb-load-misses / itlb-load-misses, so the uppercase
+    candidates were dropped BEFORE perf stat was tried — even though
+    perf stat -e LLC-load-misses (and the TLB events) accept and count.
+  - Additional live events on this PMU (confirmed with perf stat):
+    mem_load_retired.l3_miss, mem_load_retired.l3_hit, longest_lat_cache.miss.
+  - Topology: numa_nodes=1, llc_domains=1, llc_size=12288K, shared 0-11.
+    numa_balancing=0. PSI present. /proc/schedstat present.
+
+Harness changes (Task 10) — no kernel patch
+  1. collect.sh probe_perf: case-insensitive perf-list match; keep canonical
+     event names for delta.awk; also probe mem_load_retired.l3_{miss,hit}
+     and longest_lat_cache.miss as LLC fallbacks.
+  2. lib/delta.awk: accept lowercase aliases; map to canonical; emit
+     cache_miss_rate, llc_misses_per_kinstr, l3_misses, l3_hits,
+     ttwu_remote_frac; fall back LLC from longest_lat / l3_miss when needed.
+  3. collect_meta: always write meta/topology.txt (numa_nodes, llc_domains,
+     llc_size, numa_balancing, single-node/single-LLC notes).
+  4. snapshot: PSI memory/cpu/io before+after under run/psi/.
+  5. tasks.conf Task 10 primary metrics expanded to include llc_load_misses,
+     cache_miss_rate, llc_misses_per_kinstr, l3_misses, tlb_misses,
+     ttwu_remote_frac / ttwu_remote_delta beside cycles.
+  6. workloads/locality_account.sh: prepare helper writes locality_caps.txt
+     (which PMU events accept); run path reuses migrate_storm.
+  7. compare.sh labels for the new metric keys.
+
+What was NOT done (and why)
+  - No 7.2.9-t10 kernel, no 0010-*.patch, baseline tree untouched.
+  - No fake LLC-miss numbers and no invented PMU events.
+  - Scheduler locality policy changes would not show migration wins on
+    1 LLC / 1 NUMA (see Task 2). Task 10 is accounting, not placement.
+  - A gated kernel counter was not justified: the missing data was a
+    harness probe bug, not a missing kernel ABI. /proc/schedstat,
+    /proc/vmstat numa_*, PSI, and the HW PMU already expose what we need.
+
+Hardware limits (critical — usable now vs needs multi-LLC)
+  USABLE NOW on this box:
+    - cache_misses + cache_miss_rate + cache_misses_per_kinstr next to cycles
+    - LLC-load-misses + llc_misses_per_kinstr + PEBS l3_misses/l3_hits
+    - dTLB/iTLB / tlb_misses
+    - ttwu_remote_frac (runqueue wake locality) with --schedstats
+    - topology.txt + PSI snapshots on every run
+  NOT PROVABLE here (needs multi-LLC / multi-NUMA hardware):
+    - Cross-LLC preferred-placement wins (Task 1/2/13 style)
+    - Remote NUMA access rates / numa_hint_faults movement (always 0 here;
+      numa_balancing=0 and only one node)
+    - Unbound workqueue LLC-pin vs node-RR (Task 13) — survey-only note below
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261006T164408+0000-task10   (runs/BASELINE-task10/SETS.txt)
+  stock S2  20261006T164502+0000-task10
+  stock S3  20261006T164557+0000-task10
+  patched: none (not needed — harness/telemetry result)
+  smoke on t9 (pre-reboot, not baseline): 20261006T164027+0000-task10
+  compare.sh noise: runs/compare-task10/{S1-vs-S2,S2-vs-S3,S1-vs-S3}.txt
+  caps: reports/task10-locality-caps.txt
+
+perf_events after fix (every stock run, perf_dropped=none)
+  cycles,instructions,cache-references,cache-misses,LLC-load-misses,
+  dTLB-load-misses,iTLB-load-misses,context-switches,cpu-migrations,
+  mem_load_retired.l3_miss,mem_load_retired.l3_hit,longest_lat_cache.miss
+
+migrate_load (primary locality storm) — S1 / S2 / S3
+  cycles (x1e12)              1.019 / 1.019 / 1.019
+  instructions (x1e11)        1.474 / 1.453 / 1.424
+  ipc                         0.145 / 0.143 / 0.140
+  cache_misses (x1e3)         560.3 / 661.9 / 1387.4
+  cache_misses_per_kinstr     0.004 / 0.005 / 0.010
+  cache_miss_rate             ~0    / ~0    / 0.0001
+  llc_load_misses (x1e3)      149.5 / 239.1 / 725.4     ← was n/a before Task 10
+  llc_misses_per_kinstr       0.001 / 0.002 / 0.005
+  l3_misses (PEBS, x1e3)      118.7 / 211.3 / 693.1
+  l3_hits (PEBS, x1e9)       10.73 / 10.99 / 11.36
+  tlb_misses (x1e3)           549.6 / 546.3 / 538.9     ← was n/a before Task 10
+  cpu_migrations              6272  / 6194  / 6253
+  ttwu_remote_frac            0.752 / 0.748 / 0.743
+  rq_latency_ns (x1e6)        2.158 / 2.157 / 2.151
+  numa_hint_faults_delta      0 / 0 / 0
+  wl_numa_nodes / wl_llc_domains = 1 / 1 every run
+
+wake_llc — S1 / S2 / S3 (cache-miss first-class beside cycles)
+  cycles (x1e11)              3.144 / 3.171 / 3.062
+  cache_misses (x1e3)         402.1 / 383.3 / 395.0
+  llc_load_misses (x1e3)       64.6 /  55.7 /  54.6
+  ttwu_remote_frac            0.804 / 0.833 / 0.782
+
+general — S1 / S2 / S3
+  cycles (x1e11)              1.495 / 1.494 / 1.500
+  cache_misses (x1e8)         2.530 / 2.523 / 2.675
+  cache_miss_rate             0.119 / 0.117 / 0.119
+  llc_load_misses (x1e6)      8.995 / 9.316 / 9.558
+  llc_misses_per_kinstr       0.036 / 0.037 / 0.039
+
+database (sqlite short path) — S1 / S2 / S3
+  wall_time_sec               0.049 / 0.044 / 0.039   (very short; high noise)
+  cache_misses / llc still recorded; treat as telemetry smoke, not a gate.
+
+How to read
+  Noise on cache_misses / llc_load_misses across S1..S3 is large on
+  migrate_load (LLC misses swing ~5×). That is expected for a migration
+  storm on one shared L3 — do not treat a single pair as a locality win.
+  The Task 10 success criterion is that the counters are collected and
+  sit next to cycles in metrics.env / compare.sh --task 10, with n/a only
+  when the PMU truly rejects the event (perf_dropped).
+
+Verdict: PASS (harness / telemetry) — not a kernel win claim.
+  - Cache-miss, LLC-miss, TLB-miss, l3 hit/miss, and ttwu_remote_frac are
+    now first-class beside cycles on Task 10 workloads.
+  - Root cause of prior empty LLC/TLB fields fixed (case-insensitive probe).
+  - Single-LLC / single-NUMA hardware: usable for miss-rate accounting;
+    NOT usable to prove cross-LLC or remote-NUMA policy wins.
+  - No t10 kernel. Leave boot on 7.2.9-t9.
+
+Suggested next (do not auto-start)
+  Task 13 (unbound work LLC pin): needs multi-LLC hardware to score
+  cache_misses / cpu_migrations under issuer-LLC pin vs node RR. On this
+  box it can only be a survey + harness wiring check. Prefer a multi-LLC
+  host before claiming a pin win. Task 11 (util_est) is independent of
+  LLC topology and can run here.
+
+Artifact paths
+  Report:  /home/kernelmaster/kernel-measure/reports/task10-before-after.txt
+           /workspace/kernel-measure/reports/task10-before-after.txt
+  Caps:    .../reports/task10-locality-caps.txt
+  Runs:    .../runs/BASELINE-task10/SETS.txt
+           .../runs/20261006T164408+0000-task10
+           .../runs/20261006T164502+0000-task10
+           .../runs/20261006T164557+0000-task10
+  Compare: .../runs/compare-task10/
+  Harness: collect.sh, lib/delta.awk, tasks.conf, compare.sh,
+           workloads/locality_account.sh (synced box ↔ server)

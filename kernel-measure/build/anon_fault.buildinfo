@@ -1,0 +1,5 @@
+source=/home/kernelmaster/kernel-measure/workloads/src/anon_fault.c
+source_sha256=24ab2d9ba0048247361fc474cd7e8a1feb58c9ac31c58070ef1aac0cb41511e2
+compiler=cc
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+built=2026-10-06T15:54:48+0000

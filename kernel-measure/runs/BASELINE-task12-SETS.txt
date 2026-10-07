@@ -1,0 +1,5 @@
+# STOCK arm Task 12 — no threadirqs / no rcu_nocbs / use_softirq=Y
+# recorded 2026-10-06T17:11:53Z uname=7.2.9-baseline
+runs/20261006T171115+0000-task12
+runs/20261006T171036+0000-task12
+runs/20261006T170958+0000-task12

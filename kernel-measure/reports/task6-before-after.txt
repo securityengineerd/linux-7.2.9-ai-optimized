@@ -1,0 +1,124 @@
+Task 6 (anon write-fault zeroing / mTHP) — policy-path PASS on stock
+====================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+Stock measured: Tue Oct 6 2026, 08:57 PT (= 15:57 UTC) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 6 --schedstats
+Workload: anon_fault = build/anon_fault -s 1024 -p 4096 -r 1
+  Path A: mmap 1024 MiB anon + MADV_NOHUGEPAGE, write-touch every 4 KiB page
+  Path B: mmap 1024 MiB anon + MADV_HUGEPAGE,   write-touch every 4 KiB page
+  Same byte budget + matching checksums on both paths every run.
+Every run status=ok. No patched kernel was built. Baseline tree not modified.
+
+Kernels /boot present
+  stock   : 7.2.9-baseline (measured)
+  also    : 7.2.9-ai-opt, 7.2.9-t3, 7.2.9-t9, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after stock measure; no t6 image installed)
+
+Survey (Phase 1)
+  Baseline tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (not modified).
+  do_anonymous_page(): reads use the shared zero page; writes call
+  alloc_anon_folio() and folio_zero_user() on the fault.
+  alloc_anon_folio(): multi-size THP orders below PMD via
+  thp_vma_allowable_orders(); installs as PTEs (set_pte_range).
+  do_huge_pmd_anonymous_page(): live PMD (2 MiB) anon path — amortizes
+  fault trips and zeroing over one huge folio.
+  create_huge_pud(): "No support for anonymous transparent PUD pages yet"
+  → VM_FAULT_FALLBACK for anon. Anonymous 1 GiB PUD is still missing.
+  Sysfs on stock: transparent_hugepage/enabled = [madvise];
+  hugepages-2048kB = [inherit]; mid-size mTHP (64k..1024k) = [never] for anon.
+  Full notes: reports/task6-survey.txt.
+
+Hardware limits
+  tlb_misses = n/a from perf on this CPU (recorded as n/a in metrics.env).
+  Rely on wall fault_ns, getrusage minor faults, /proc/vmstat thp_fault_alloc,
+  and per-size hugepages-2048kB/stats/anon_fault_alloc.
+  Single socket / single NUMA — no multi-node THP interaction.
+
+Harness
+  Task 6 previously used generic "general" (stress-ng), which does not
+  isolate anon write-fault zeroing. Added targeted workload anon_fault (C)
+  and rewired tasks.conf Task 6 -> anon_fault. Synced /workspace <-> server.
+
+What was attempted
+  - Survey anon fault / PMD / mTHP / create_huge_pud (read-only).
+  - New workload + 3× stock measure on 7.2.9-baseline under default madvise.
+  - Looked for a small safe kernel change. Anonymous PUD would be major new
+    MM work (fault, zap, split, migration, uffd, reclaim). Mid-size mTHP
+    already exists but defaults OFF; enabling it is a sysfs policy, not a
+    patch. No fake kernel win. No linux-7.2.9-t6 tree, no 0006-*.patch.
+
+Policy under test (already in-tree)
+  Stock THP=madvise + MADV_HUGEPAGE → PMD 2 MiB anon faults.
+  MADV_NOHUGEPAGE → order-0 control (same process, same SIZE).
+  Mid-size mTHP left at [never] (ANONFAULT_ENABLE_MTHP=0).
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261006T155737+0000-task6   (runs/BASELINE-task6 -> this)
+  stock S2  20261006T155739+0000-task6
+  stock S3  20261006T155741+0000-task6
+  patched: none (not needed — policy/application-path result)
+
+Same-work proof (each path write-touches wl_bytes = 1073741824 = 1024 MiB)
+  checksum identical on both paths every run:
+  wl_*_checksum=7782479378671468544
+
+Per-path first-touch write-fault (primary Task 6 signal)
+  metric                              S1            S2            S3
+  wl_nohuge_fault_ns (x1e6)         213.69        212.15        207.55
+  wl_hugeprefer_fault_ns (x1e6)      33.27         33.27         33.92
+  wl_hugeprefer_vs_nohuge_fault_ns_ratio
+                                     0.1557        0.1568        0.1635
+  wl_nohuge_minflt                 262144        262144        262144
+  wl_hugeprefer_minflt                512           512           512
+  wl_hugeprefer_vs_nohuge_minflt_ratio
+                                     0.001953      0.001953      0.001953
+  wl_nohuge_fault_GBps                5.025         5.061         5.173
+  wl_hugeprefer_fault_GBps           32.273        32.277        31.651
+
+THP counters (per-run delta from vmstat_before/after)
+  thp_fault_alloc / 2048kB anon_fault_alloc: +512 / +512 on every run
+  2048kB anon_fault_fallback: 0 on every run
+  (1024 MiB / 2 MiB = 512 PMD pages — exact match)
+
+Whole-run perf (wraps both paths + setup; not the free variable)
+  cycles (x1e9)                      1.807         1.803         1.893
+  instructions (x1e9)                2.271         2.262         2.273
+  cache_misses (x1e6)               37.71         37.49         39.57
+  wall_time_sec                      0.650         0.627         0.510
+  tlb_misses                         n/a           n/a           n/a
+
+How to read
+  Pass gate is "lower fault cost when larger anon pages amortize zeroing."
+  Within each run, hugeprefer (PMD) finishes the same 1024 MiB write-touch in
+  ~15.6–16.4% of nohuge wall-ns (≈6.1–6.4× faster) on all 3 runs, with
+  exact 512:1 reduction in minor faults (262144 → 512) and +512 PMD
+  thp_fault_alloc / zero fallback. Checksums match → same stores.
+  Run-to-run noise on the ratio is ~(0.1635−0.1557)/0.1587 ≈ 4.9% relative;
+  the ~84% fault_ns cut clears that noise with the same sign on all 3 pairs.
+  Aggregate perf cycles wrap both paths and are not the pass metric.
+  tlb_misses unavailable on this CPU — PMD TLB benefit inferred from minflt
+  and PMD install stats, not from missing PMU events.
+
+Anonymous PUD (still missing)
+  create_huge_pud() still returns FALLBACK for anon. A true 1 GiB anonymous
+  page would be new kernel work; not attempted. Closing roadmap line still
+  applies: "PMD and mTHP so zeroing is amortized."
+
+Verdict: PASS (policy / application-path) — no kernel patch
+  - MADV_HUGEPAGE under stock THP=madvise installs PMD anon pages and
+    amortizes write-fault zeroing vs MADV_NOHUGEPAGE on every run.
+  - Mid-size mTHP (64k..1M) exists in sysfs but defaults [never]; enabling
+    is `echo always > .../hugepages-NkB/enabled` (optional; not required
+    for the PMD win shown here). Workload supports ANONFAULT_ENABLE_MTHP=1.
+  - Anonymous PUD remains unimplemented — document only; do not invent a
+    1 GiB anon patch for this task.
+  - Recommendation: callers that allocate large anon should MADV_HUGEPAGE
+    (or run with transparent_hugepage=always). Kernel left on known-good
+    7.2.9-t9 after measure; THP sysfs left at stock defaults.
+
+Report / artifact paths
+  /home/kernelmaster/kernel-measure/reports/task6-before-after.txt
+  /home/kernelmaster/kernel-measure/reports/task6-survey.txt
+  /workspace/kernel-measure/reports/task6-before-after.txt  (synced)
+  Workload: workloads/src/anon_fault.c, workloads/anon_fault.sh
+  No patch. No linux-7.2.9-t6 tree.

@@ -1,0 +1,68 @@
+BASELINE -> 20261004T225740+0000-set
+BASELINE-llc-idle -> 20261004T220137+0000-set
+BASELINE-task1 -> 20261005T032835+0000-task1
+BASELINE-task10/ (dir)
+  SETS:
+  kernel=7.2.9-baseline
+  host=ns1021128
+  n=3
+  S1=runs/20261006T164408+0000-task10
+  S2=runs/20261006T164502+0000-task10
+  S3=runs/20261006T164557+0000-task10
+BASELINE-task11 -> 20261006T165510+0000-task11
+BASELINE-task11-SETS.txt:
+  # Task 11 stock UTIL_EST=ON on 7.2.9-baseline
+  # Measured Tue Oct 6 2026 ~09:55-09:57 PT (16:55-16:57 UTC)
+  S1 20261006T165510+0000-task11
+  S2 20261006T165558+0000-task11
+  S3 20261006T165647+0000-task11
+  BASELINE-task11 -> 20261006T165510+0000-task11
+BASELINE-task12 -> 20261006T170958+0000-task12
+BASELINE-task12-SETS.txt:
+  # STOCK arm Task 12 — no threadirqs / no rcu_nocbs / use_softirq=Y
+  # recorded 2026-10-06T17:11:53Z uname=7.2.9-baseline
+  runs/20261006T171115+0000-task12
+  runs/20261006T171036+0000-task12
+  runs/20261006T170958+0000-task12
+BASELINE-task15 -> 20261006T173224+0000-task15
+BASELINE-task15-SETS.txt:
+  /home/kernelmaster/kernel-measure/runs/20261006T173224+0000-task15
+  /home/kernelmaster/kernel-measure/runs/20261006T173253+0000-task15
+  /home/kernelmaster/kernel-measure/runs/20261006T173322+0000-task15
+BASELINE-task2 -> 20261005T145432+0000-task2
+BASELINE-task3 -> 20261006T023447+0000-task3
+BASELINE-task4 -> 20261006T040504+0000-task4
+BASELINE-task5 -> 20261006T041428+0000-task5
+BASELINE-task6 -> 20261006T155737+0000-task6
+BASELINE-task7 -> ALWAYS-task7
+BASELINE-task8/ (dir)
+  SETS:
+  /home/kernelmaster/kernel-measure/runs/20261006T163256+0000-task8
+  /home/kernelmaster/kernel-measure/runs/20261006T163309+0000-task8
+  /home/kernelmaster/kernel-measure/runs/20261006T163322+0000-task8
+BASELINE-task9 -> 20261006T033329+0000-task9
+ALWAYS-task7/ (dir)
+  SETS:
+  runs/20261006T161806+0000-task7
+  runs/20261006T161818+0000-task7
+  runs/20261006T161829+0000-task7
+DEFER-task7/ (dir)
+  SETS:
+  runs/20261006T161841+0000-task7
+  runs/20261006T161853+0000-task7
+  runs/20261006T161904+0000-task7
+DEFER-task12 -> 20261006T171616+0000-task12
+NOUTIL-task11 -> 20261006T165735+0000-task11
+PARTIAL-task8/ (dir)
+  SETS:
+  /home/kernelmaster/kernel-measure/runs/20261006T163256+0000-task8
+  /home/kernelmaster/kernel-measure/runs/20261006T163309+0000-task8
+  /home/kernelmaster/kernel-measure/runs/20261006T163322+0000-task8
+SWAPFB-task8/ (dir)
+  SETS:
+  /home/kernelmaster/kernel-measure/runs/20261006T163420+0000-task8
+UNDERUSED-task8/ (dir)
+  SETS:
+  /home/kernelmaster/kernel-measure/runs/20261006T163342+0000-task8
+  /home/kernelmaster/kernel-measure/runs/20261006T163355+0000-task8
+  /home/kernelmaster/kernel-measure/runs/20261006T163408+0000-task8

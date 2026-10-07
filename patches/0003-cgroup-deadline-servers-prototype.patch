@@ -1,0 +1,423 @@
+sched/fair: cgroup deadline servers prototype (Task 3 option B)
+
+Prototype: when kernel.sched_cgroup_dl_servers=1 (default 0), admit a
+per-CPU deadline server for bandwidth-root cgroups — groups that have
+cpu.max set and no ancestor below root also has quota. That covers
+survey "depth-1 under root with cpu.max" and deeper first-capped leaves
+(the Task 3 harness throttle groups).
+
+When enabled:
+- Server pick starts at that group's cfs_rq (pick_task_fair_from), not
+  always at the root.
+- CFS bandwidth period refill / throttling stay authoritative; we do
+  NOT bypass distribute_cfs_runtime. The DL server is an additional
+  fair_server-style pick path (50ms/1000ms params) for enqueue cost.
+- Hierarchical cpu.weight among opted-in siblings is NOT rebuilt —
+  weight sharing may be wrong/ignored on the DL pick path. This is a
+  prototype for enqueue/bandwidth-timer cost, not a shipping cgroup
+  redesign.
+
+Feature off (default) => identical to stock (static key; no servers
+allocated). Enable before creating capped cgroups:
+  sudo sysctl -w kernel.sched_cgroup_dl_servers=1
+
+LOCALVERSION=-t3 for the measured image.
+
+---
+--- a/kernel/sched/sched.h	2026-10-03 10:43:16.000000000 +0000
++++ b/kernel/sched/sched.h	2026-10-06 02:40:46.971506746 +0000
+@@ -418,6 +418,29 @@
+ 
+ extern void fair_server_init(struct rq *rq);
+ extern void ext_server_init(struct rq *rq);
++
++/*
++ * Task-3 prototype: per-cgroup deadline server (see fair.c).
++ * Hierarchical cpu.weight among opted-in siblings is NOT rebuilt —
++ * this is an enqueue/bandwidth-timer cost prototype, not a shipping
++ * cgroup redesign.
++ */
++struct cgroup_dl_server {
++	struct sched_dl_entity	dl_se;
++	struct task_group	*tg;
++};
++
++#ifdef CONFIG_CFS_BANDWIDTH
++extern void sched_cgroup_dl_server_bandwidth_changed(struct task_group *tg,
++						     bool runtime_enabled);
++extern void sched_cgroup_dl_server_detach(struct task_group *tg);
++#else
++static inline void
++sched_cgroup_dl_server_bandwidth_changed(struct task_group *tg,
++					 bool runtime_enabled) { }
++static inline void sched_cgroup_dl_server_detach(struct task_group *tg) { }
++#endif
++
+ extern void __dl_server_attach_root(struct sched_dl_entity *dl_se, struct rq *rq);
+ extern int dl_server_apply_params(struct sched_dl_entity *dl_se,
+ 		    u64 runtime, u64 period, bool init);
+@@ -517,6 +540,14 @@
+ 
+ 	struct cfs_bandwidth	cfs_bandwidth;
+ 
++	/*
++	 * Task-3 prototype: optional per-CPU deadline servers for groups that
++	 * have cpu.max set and are a bandwidth-root (no ancestor below root
++	 * also has quota). Allocated only when kernel.sched_cgroup_dl_servers=1
++	 * and bandwidth is enabled; NULL otherwise so stock behavior is unchanged.
++	 */
++	struct cgroup_dl_server __percpu *cg_dl_server;
++
+ #ifdef CONFIG_UCLAMP_TASK_GROUP
+ 	/* The two decimal precision [%] value requested from user-space */
+ 	unsigned int		uclamp_pct[UCLAMP_CNT];
+--- a/kernel/sched/fair.c	2026-10-03 10:43:16.000000000 +0000
++++ b/kernel/sched/fair.c	2026-10-06 02:41:55.799007560 +0000
+@@ -123,6 +123,15 @@
+  * (default: 5 msec, units: microseconds)
+  */
+ static unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
++/*
++ * Task-3 prototype gate. Default 0 => identical to stock.
++ * When 1, bandwidth-root groups (own cpu.max, no ancestor quota) get a
++ * per-CPU deadline server whose pick walks that group's cfs_rq.
++ * CFS period refill / throttling stays authoritative; hierarchical
++ * cpu.weight among opted-in siblings is NOT rebuilt.
++ */
++static unsigned int sysctl_sched_cgroup_dl_servers;
++DEFINE_STATIC_KEY_FALSE(sched_cgroup_dl_servers_key);
+ #endif
+ 
+ #ifdef CONFIG_NUMA_BALANCING
+@@ -131,6 +140,30 @@
+ #endif
+ 
+ #ifdef CONFIG_SYSCTL
++#ifdef CONFIG_CFS_BANDWIDTH
++static int sysctl_sched_cgroup_dl_servers_handler(const struct ctl_table *table,
++						  int write, void *buffer,
++						  size_t *lenp, loff_t *ppos)
++{
++	int ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
++
++	if (ret || !write)
++		return ret;
++
++	if (sysctl_sched_cgroup_dl_servers)
++		static_branch_enable(&sched_cgroup_dl_servers_key);
++	else
++		static_branch_disable(&sched_cgroup_dl_servers_key);
++
++	/*
++	 * Existing groups are admitted/detached lazily on the next
++	 * cpu.max write (tg_set_cfs_bandwidth). Enable the sysctl before
++	 * creating capped cgroups, or rewrite cpu.max after enabling.
++	 */
++	return 0;
++}
++#endif /* CONFIG_CFS_BANDWIDTH */
++
+ static const struct ctl_table sched_fair_sysctls[] = {
+ #ifdef CONFIG_CFS_BANDWIDTH
+ 	{
+@@ -141,6 +174,15 @@
+ 		.proc_handler   = proc_dointvec_minmax,
+ 		.extra1         = SYSCTL_ONE,
+ 	},
++	{
++		.procname       = "sched_cgroup_dl_servers",
++		.data           = &sysctl_sched_cgroup_dl_servers,
++		.maxlen         = sizeof(unsigned int),
++		.mode           = 0644,
++		.proc_handler   = sysctl_sched_cgroup_dl_servers_handler,
++		.extra1         = SYSCTL_ZERO,
++		.extra2         = SYSCTL_ONE,
++	},
+ #endif
+ #ifdef CONFIG_NUMA_BALANCING
+ 	{
+@@ -7885,6 +7927,13 @@
+  * increased. Here we update the fair scheduling stats and
+  * then put the task into the rbtree:
+  */
++#ifdef CONFIG_CFS_BANDWIDTH
++static void cgroup_dl_server_enqueue_hint(struct rq *rq, struct task_struct *p);
++#else
++static inline void cgroup_dl_server_enqueue_hint(struct rq *rq,
++						struct task_struct *p) { }
++#endif
++
+ static void
+ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ {
+@@ -7977,6 +8026,8 @@
+ 	if (!rq_h_nr_queued && rq->cfs.h_nr_queued)
+ 		dl_server_start(&rq->fair_server);
+ 
++	cgroup_dl_server_enqueue_hint(rq, p);
++
+ 	/* At this point se is NULL and we are at root level*/
+ 	add_nr_running(rq, 1);
+ 
+@@ -9997,7 +10048,15 @@
+ 	resched_curr_lazy(rq);
+ }
+ 
+-struct task_struct *pick_task_fair(struct rq *rq, struct rq_flags *rf)
++/*
++ * Pick a fair task starting from @start_cfs_rq instead of always at the root.
++ * Used by the per-cgroup deadline-server prototype so the server selects
++ * within the capped group's hierarchy. When @start_cfs_rq is empty, return
++ * NULL (do not idle-balance) so the DL server can stop itself.
++ */
++static struct task_struct *
++pick_task_fair_from(struct rq *rq, struct cfs_rq *start_cfs_rq,
++		    struct rq_flags *rf, bool allow_idle_balance)
+ 	__must_hold(__rq_lockp(rq))
+ {
+ 	struct sched_entity *se;
+@@ -10007,9 +10066,12 @@
+ 	int new_tasks;
+ 
+ again:
+-	cfs_rq = &rq->cfs;
+-	if (!cfs_rq->nr_queued)
++	cfs_rq = start_cfs_rq;
++	if (!cfs_rq->nr_queued) {
++		if (!allow_idle_balance || cfs_rq != &rq->cfs)
++			return NULL;
+ 		goto idle;
++	}
+ 
+ 	throttled = false;
+ 
+@@ -10041,6 +10103,12 @@
+ 	return NULL;
+ }
+ 
++struct task_struct *pick_task_fair(struct rq *rq, struct rq_flags *rf)
++	__must_hold(__rq_lockp(rq))
++{
++	return pick_task_fair_from(rq, &rq->cfs, rf, true);
++}
++
+ static struct task_struct *
+ fair_server_pick_task(struct sched_dl_entity *dl_se, struct rq_flags *rf)
+ 	__must_hold(__rq_lockp(dl_se->rq))
+@@ -10057,6 +10125,194 @@
+ 	dl_server_init(dl_se, rq, fair_server_pick_task);
+ }
+ 
++#ifdef CONFIG_CFS_BANDWIDTH
++/*
++ * Task-3 prototype helpers.
++ *
++ * Survey option (B): per-cgroup deadline servers for bandwidth-capped groups
++ * instead of relying solely on nested EEVDF + CFS period refill for the
++ * capped subtree's pick path.
++ *
++ * Scope (honest):
++ *  - Feature defaults OFF (sysctl kernel.sched_cgroup_dl_servers=0).
++ *  - When on, admit a per-CPU dl_server for bandwidth-root groups: the group
++ *    has cpu.max set and no ancestor below root also has quota. That covers
++ *    depth-1-under-root groups with cpu.max (survey wording) and deeper
++ *    first-capped leaves (Task 3 harness throttle groups).
++ *  - Server pick starts at that group's cfs_rq, not the root.
++ *  - CFS bandwidth period refill and throttling remain authoritative —
++ *    we do NOT bypass distribute_cfs_runtime. The DL server is an additional
++ *    pick path (fair_server-style) sized like the global fair_server so DL
++ *    bw admission stays realistic.
++ *  - Hierarchical cpu.weight among opted-in siblings is NOT rebuilt; weight
++ *    sharing may be wrong/ignored for the DL pick path. Prototype only.
++ */
++
++static bool cgroup_dl_server_is_bw_root(struct task_group *tg)
++{
++	struct task_group *p;
++
++	if (!tg || is_root_task_group(tg))
++		return false;
++	if (tg->cfs_bandwidth.quota == RUNTIME_INF)
++		return false;
++
++	for (p = tg->parent; p && !is_root_task_group(p); p = p->parent) {
++		if (p->cfs_bandwidth.quota != RUNTIME_INF)
++			return false;
++	}
++	return true;
++}
++
++static struct task_struct *
++cgroup_dl_server_pick_task(struct sched_dl_entity *dl_se, struct rq_flags *rf)
++	__must_hold(__rq_lockp(dl_se->rq))
++{
++	struct cgroup_dl_server *cs =
++		container_of(dl_se, struct cgroup_dl_server, dl_se);
++	struct rq *rq = dl_se->rq;
++	struct cfs_rq *cfs_rq;
++
++	if (!cs->tg)
++		return NULL;
++
++	cfs_rq = tg_cfs_rq(cs->tg, cpu_of(rq));
++	if (!cfs_rq)
++		return NULL;
++
++	return pick_task_fair_from(rq, cfs_rq, rf, false);
++}
++
++static void cgroup_dl_server_init_cpu(struct cgroup_dl_server *cs,
++				     struct task_group *tg, struct rq *rq)
++{
++	struct sched_dl_entity *dl_se = &cs->dl_se;
++	u64 runtime = 50 * NSEC_PER_MSEC;
++	u64 period = 1000 * NSEC_PER_MSEC;
++
++	memset(cs, 0, sizeof(*cs));
++	cs->tg = tg;
++	init_dl_entity(dl_se);
++	dl_server_init(dl_se, rq, cgroup_dl_server_pick_task);
++
++	/*
++	 * Match fair_server defaults. Apply may fail if DL bw is exhausted;
++	 * in that case leave this CPU without an active server (dl_runtime 0
++	 * / not attached) rather than breaking CFS bandwidth.
++	 */
++	if (dl_server_apply_params(dl_se, runtime, period, 1)) {
++		cs->tg = tg; /* keep cookie for debugging */
++		dl_se->dl_runtime = 0;
++		return;
++	}
++
++	dl_se->dl_server = 1;
++	dl_se->dl_defer = 1;
++	/* setup_new_dl_entity is deadline.c-local; first dl_server_start replenishes. */
++}
++
++void sched_cgroup_dl_server_detach(struct task_group *tg)
++{
++	struct cgroup_dl_server __percpu *servers;
++	int cpu;
++
++	if (!tg)
++		return;
++
++	servers = tg->cg_dl_server;
++	if (!servers)
++		return;
++
++	for_each_possible_cpu(cpu) {
++		struct cgroup_dl_server *cs = per_cpu_ptr(servers, cpu);
++		struct rq *rq = cpu_rq(cpu);
++		struct rq_flags rf;
++
++		rq_lock_irq(rq, &rf);
++		if (dl_server_active(&cs->dl_se))
++			dl_server_stop(&cs->dl_se);
++		if (cs->dl_se.dl_bw_attached)
++			dl_server_detach_bw(&cs->dl_se);
++		cs->dl_se.dl_server = 0;
++		cs->dl_se.dl_runtime = 0;
++		cs->tg = NULL;
++		rq_unlock_irq(rq, &rf);
++	}
++
++	free_percpu(servers);
++	tg->cg_dl_server = NULL;
++}
++
++static int cgroup_dl_server_admit(struct task_group *tg)
++{
++	struct cgroup_dl_server __percpu *servers;
++	int cpu;
++
++	if (tg->cg_dl_server)
++		return 0;
++
++	servers = alloc_percpu(struct cgroup_dl_server);
++	if (!servers)
++		return -ENOMEM;
++
++	for_each_possible_cpu(cpu) {
++		struct cgroup_dl_server *cs = per_cpu_ptr(servers, cpu);
++		struct rq *rq = cpu_rq(cpu);
++		struct rq_flags rf;
++
++		rq_lock_irq(rq, &rf);
++		update_rq_clock(rq);
++		cgroup_dl_server_init_cpu(cs, tg, rq);
++		rq_unlock_irq(rq, &rf);
++	}
++
++	/*
++	 * Publish after init so enqueue hints never observe a half-built
++	 * percpu array. Pairs with READ on the enqueue hint path.
++	 */
++	WRITE_ONCE(tg->cg_dl_server, servers);
++	return 0;
++}
++
++void sched_cgroup_dl_server_bandwidth_changed(struct task_group *tg,
++					     bool runtime_enabled)
++{
++	if (!static_branch_unlikely(&sched_cgroup_dl_servers_key)) {
++		/* Feature off: ensure no leftover servers from a prior enable. */
++		if (tg->cg_dl_server)
++			sched_cgroup_dl_server_detach(tg);
++		return;
++	}
++
++	if (runtime_enabled && cgroup_dl_server_is_bw_root(tg))
++		cgroup_dl_server_admit(tg);
++	else if (tg->cg_dl_server)
++		sched_cgroup_dl_server_detach(tg);
++}
++
++static void cgroup_dl_server_enqueue_hint(struct rq *rq, struct task_struct *p)
++{
++	struct task_group *tg;
++	struct cgroup_dl_server __percpu *servers;
++	struct cgroup_dl_server *cs;
++
++	if (!static_branch_unlikely(&sched_cgroup_dl_servers_key))
++		return;
++
++	tg = task_group(p);
++	while (tg && !is_root_task_group(tg)) {
++		servers = READ_ONCE(tg->cg_dl_server);
++		if (servers) {
++			cs = per_cpu_ptr(servers, cpu_of(rq));
++			if (cs->dl_se.dl_server && cs->dl_se.dl_runtime)
++				dl_server_start(&cs->dl_se);
++			return;
++		}
++		tg = tg->parent;
++	}
++}
++#endif /* CONFIG_CFS_BANDWIDTH */
++
+ /*
+  * Account for a descheduled task:
+  */
+@@ -15193,6 +15449,9 @@
+ 
+ void free_fair_sched_group(struct task_group *tg)
+ {
++#ifdef CONFIG_CFS_BANDWIDTH
++	sched_cgroup_dl_server_detach(tg);
++#endif
+ 	free_percpu(tg->cfs_rq);
+ }
+ 
+--- a/kernel/sched/core.c	2026-10-03 10:43:16.000000000 +0000
++++ b/kernel/sched/core.c	2026-10-06 02:41:21.805093282 +0000
+@@ -9942,6 +9942,9 @@
+ 	if (runtime_was_enabled && !runtime_enabled)
+ 		cfs_bandwidth_usage_dec();
+ 
++	/* Task-3 prototype: admit/detach per-cgroup DL servers when gated on. */
++	sched_cgroup_dl_server_bandwidth_changed(tg, runtime_enabled);
++
+ 	return 0;
+ }
+ 

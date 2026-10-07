@@ -1,0 +1,145 @@
+From: Kernel Master <kernelmaster@local>
+Subject: [PATCH] io_uring: gated lockless submit for SINGLE_ISSUER
+
+Task 9 prototype. Sysctl kernel.io_uring_lockless_submit defaults OFF.
+Skips uring_lock around io_submit_sqes for SINGLE_ISSUER+LOCKLESS_CQ
+when enabled. See patch body comments for safety limits.
+
+--- a/io_uring/io_uring.c	2026-10-03 10:43:16.000000000 +0000
++++ b/io_uring/io_uring.c	2026-10-06 03:14:30.039036454 +0000
+@@ -128,6 +128,25 @@
+ 
+ static int __read_mostly sysctl_io_uring_disabled;
+ static int __read_mostly sysctl_io_uring_group = -1;
++/* Task 9: lockless single-issuer submit (default OFF). */
++static unsigned int sysctl_io_uring_lockless_submit;
++DEFINE_STATIC_KEY_FALSE(io_uring_lockless_submit_key);
++
++static int sysctl_io_uring_lockless_submit_handler(const struct ctl_table *table,
++						  int write, void *buffer,
++						  size_t *lenp, loff_t *ppos)
++{
++	int ret;
++
++	ret = proc_douintvec_minmax(table, write, buffer, lenp, ppos);
++	if (ret || !write)
++		return ret;
++	if (sysctl_io_uring_lockless_submit)
++		static_branch_enable(&io_uring_lockless_submit_key);
++	else
++		static_branch_disable(&io_uring_lockless_submit_key);
++	return 0;
++}
+ 
+ #ifdef CONFIG_SYSCTL
+ static const struct ctl_table kernel_io_uring_disabled_table[] = {
+@@ -147,6 +166,15 @@
+ 		.mode		= 0644,
+ 		.proc_handler	= proc_dointvec,
+ 	},
++	{
++		.procname	= "io_uring_lockless_submit",
++		.data		= &sysctl_io_uring_lockless_submit,
++		.maxlen		= sizeof(unsigned int),
++		.mode		= 0644,
++		.proc_handler	= sysctl_io_uring_lockless_submit_handler,
++		.extra1		= SYSCTL_ZERO,
++		.extra2		= SYSCTL_ONE,
++	},
+ };
+ #endif
+ 
+@@ -2019,6 +2047,31 @@
+ 	return true;
+ }
+ 
++
++/*
++ * Task 9: skip uring_lock around io_submit_sqes() on io_uring_enter() when
++ * SINGLE_ISSUER + LOCKLESS_CQ, not SQPOLL/SYSCALL_IOPOLL, caller is
++ * submitter_task, and kernel.io_uring_lockless_submit=1. Defaults OFF —
++ * concurrent uring_lock takers can still race without the upstream
++ * submitter-suspend series. Ring ABI unchanged.
++ */
++static inline bool io_lockless_submit_ok(struct io_ring_ctx *ctx)
++{
++	if (!static_branch_unlikely(&io_uring_lockless_submit_key))
++		return false;
++	if (!(ctx->flags & IORING_SETUP_SINGLE_ISSUER))
++		return false;
++	if (ctx->flags & IORING_SETUP_SQPOLL)
++		return false;
++	if (!(ctx->int_flags & IO_RING_F_LOCKLESS_CQ))
++		return false;
++	if (ctx->int_flags & IO_RING_F_SYSCALL_IOPOLL)
++		return false;
++	if (unlikely(ctx->submitter_task != current))
++		return false;
++	return true;
++}
++
+ int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr)
+ 	__must_hold(&ctx->uring_lock)
+ {
+@@ -2642,23 +2695,47 @@
+ 		if (unlikely(ret))
+ 			goto out;
+ 
+-		mutex_lock(&ctx->uring_lock);
+-		ret = io_submit_sqes(ctx, to_submit);
+-		if (ret != to_submit) {
+-			mutex_unlock(&ctx->uring_lock);
+-			goto out;
+-		}
+-		if (flags & IORING_ENTER_GETEVENTS) {
+-			if (ctx->int_flags & IO_RING_F_SYSCALL_IOPOLL)
+-				goto iopoll_locked;
++		if (io_lockless_submit_ok(ctx)) {
+ 			/*
+-			 * Ignore errors, we'll soon call io_cqring_wait() and
+-			 * it should handle ownership problems if any.
++			 * Publish SQ head / submit without uring_lock. Deferred
++			 * local task work still takes the mutex — only the hot
++			 * submit + io_commit_sqring path is unlocked.
+ 			 */
+-			if (ctx->flags & IORING_SETUP_DEFER_TASKRUN)
+-				(void)io_run_local_work_locked(ctx, min_complete);
++			ret = io_submit_sqes(ctx, to_submit);
++			if (ret != to_submit)
++				goto out;
++			if (flags & IORING_ENTER_GETEVENTS) {
++				if (ctx->int_flags & IO_RING_F_SYSCALL_IOPOLL) {
++					mutex_lock(&ctx->uring_lock);
++					goto iopoll_locked;
++				}
++				if (ctx->flags & IORING_SETUP_DEFER_TASKRUN) {
++					mutex_lock(&ctx->uring_lock);
++					(void)io_run_local_work_locked(ctx,
++									       min_complete);
++					mutex_unlock(&ctx->uring_lock);
++				}
++			}
++		} else {
++			mutex_lock(&ctx->uring_lock);
++			ret = io_submit_sqes(ctx, to_submit);
++			if (ret != to_submit) {
++				mutex_unlock(&ctx->uring_lock);
++				goto out;
++			}
++			if (flags & IORING_ENTER_GETEVENTS) {
++				if (ctx->int_flags & IO_RING_F_SYSCALL_IOPOLL)
++					goto iopoll_locked;
++				/*
++				 * Ignore errors, we'll soon call io_cqring_wait() and
++				 * it should handle ownership problems if any.
++				 */
++				if (ctx->flags & IORING_SETUP_DEFER_TASKRUN)
++					(void)io_run_local_work_locked(ctx,
++									       min_complete);
++			}
++			mutex_unlock(&ctx->uring_lock);
+ 		}
+-		mutex_unlock(&ctx->uring_lock);
+ 	}
+ 
+ 	if (flags & IORING_ENTER_GETEVENTS) {

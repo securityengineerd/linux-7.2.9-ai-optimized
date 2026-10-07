@@ -1,0 +1,5 @@
+source=/home/kernelmaster/kernel-measure/workloads/src/hot_read.c
+source_sha256=79914533e3590e10f956864f3239494a7b1c6b74e4d6517483b7d64ccc9c385c
+compiler=cc
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+built=2026-10-06T04:11:53+0000

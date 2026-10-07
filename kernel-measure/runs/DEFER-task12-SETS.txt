@@ -1,0 +1,5 @@
+# DEFER arm Task 12 — threadirqs rcu_nocbs=0-11 rcutree.use_softirq=0
+# recorded 2026-10-06T17:18:16Z uname=7.2.9-baseline
+runs/20261006T171737+0000-task12
+runs/20261006T171657+0000-task12
+runs/20261006T171616+0000-task12

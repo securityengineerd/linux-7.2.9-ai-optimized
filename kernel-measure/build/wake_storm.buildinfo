@@ -1,0 +1,5 @@
+source=/home/kernelmaster/kernel-measure/workloads/src/wake_storm.c
+source_sha256=a0f39f6fd0992e9fe38bbb8be3ec7674ad852d2cd1daa0f3838fa4526b9a8069
+compiler=cc
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+built=2026-10-05T03:24:11+0000

@@ -1,0 +1,75 @@
+Task 1 (per-LLC idle bitmap) - stock vs patched before/after
+=============================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, governor=powersave on both boots)
+Measured: Sun Oct 4 2026, 20:28-20:35 PT (America/Phoenix) = 03:28-03:35 UTC Oct 5 (run dir stamps are UTC)
+Harness: /home/kernelmaster/kernel-measure, flags: --task 1 --schedstats (schedstats=on in every run)
+Workloads: wake_llc = build/wake_storm -d 20 -m 2 -w 0 -s -1 -p 1000 -b 20
+           (same binary both boots, sha256 ce027106...aeae31cc)
+           general  = stress-ng --cpu 2 --timeout 10s --fork 2 --metrics-brief
+Every run finished with status=ok. No kernels were rebuilt and no boot entries were deleted.
+
+Kernels (uname -r checked after each reboot, and meta/uname in each run)
+  stock   : 7.2.9-baseline
+  patched : 7.2.9-llc-idle  (0001-per-llc-idle-bitmap.patch)
+
+Run sets (on the host, under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261005T032835+0000-task1   (baseline.sh --task 1; runs/BASELINE-task1 points here)
+  stock S2  20261005T032918+0000-task1
+  stock S3  20261005T032954+0000-task1
+  patch P1  20261005T033314+0000-task1
+  patch P2  20261005T033351+0000-task1
+  patch P3  20261005T033428+0000-task1
+  compare.sh output: runs/compare-task1-before-after/{S1-vs-P1,S2-vs-P2,S3-vs-P3,S2-vs-S3,S1-vs-S2,S1-vs-S3}.txt
+  (same text on the box: task1-before-after.compare-raw.txt)
+
+How to read this
+  Noise = the stock-vs-stock spread: (max-min)/mean over S1..S3, plus the S2-vs-S3 compare.
+  A delta counts only if it is bigger than that noise AND points the same way in all three pairs (S1/P1, S2/P2, S3/P3).
+
+wake_llc                         stock S1 / S2 / S3          patched P1 / P2 / P3        mean delta  stock noise  S2vsS3   pair deltas (P-S)
+  idle wake p50 (ns)             49500 / 49250 / 47750       19750 / 52250 / 35500        -26.6%      3.6%       -3.0%    -60.1 / +6.1 / -25.7 %
+  idle wake p99 (ns)             65750 / 86500 / 63750       85000 / 69250 / 129750       +31.5%     31.6%      -26.3%    +29.3 / -19.9 / +103.5 %
+  busy wake p50 (ns)             14750 / 14250 / 14250       19500 / 25000 / 28500        +68.8%      3.5%        0.0%    +32.2 / +75.4 / +100.0 %
+  busy wake p99 (ns)             41250 / 39750 / 46500       66250 / 92000 / 89500        +94.3%     15.9%      +17.0%    +60.6 / +131.4 / +92.5 %
+  rq_latency_ns (schedstat)       4934 /  5241 /  5254        8777 / 11294 / 13902       +120.2%      6.2%       +0.2%    +77.9 / +115.5 / +164.6 %
+  ttwu_remote_delta             454965 /461420 /460099      458452 /439825 /469233         -0.7%      1.4%       -0.3%    +0.8 / -4.7 / +2.0 %
+  ttwu_count_delta              563016 /561096 /560969      561842 /560917 /562220          0.0%      0.4%        0.0%    -0.2 / 0.0 / +0.2 %
+  cpu_migrations                  6192 /  5203 / 13638       63949 / 15466 /108338       +650%      101%      +162%     +933 / +197 / +694 %
+  cycles (x1e9)                  329.5 / 335.1 / 335.3       335.5 / 335.7 / 320.1         -0.9%      1.7%       +0.1%    +1.8 / +0.2 / -4.5 %
+  instructions (x1e9)            431.7 / 440.4 / 434.8       396.1 / 439.8 / 344.0         -9.7%      2.0%       -1.3%    -8.2 / -0.1 / -20.9 %
+  ipc                            1.310 / 1.314 / 1.297       1.181 / 1.310 / 1.075         -9.1%      1.3%       -1.3%    -9.8 / -0.3 / -17.1 %
+  cache_misses                  420381 /372270 /368629      394248 /369240 /482989         +7.3%     13.4%       -1.0%    -6.2 / -0.8 / +31.0 %
+  cache_misses_per_kinstr        0.001 on every run (too small to tell apart at this precision)
+
+general                          stock S1 / S2 / S3          patched P1 / P2 / P3        mean delta  stock noise  S2vsS3   pair deltas
+  rq_latency_ns                   3802 /  3587 /  3643        3686 /  3711 /  3592         -0.4%      5.8%       +1.6%    -3.1 / +3.5 / -1.4 %
+  ttwu_remote_delta              77488 / 80007 / 77761       78607 / 79206 / 79592         +0.9%      3.2%       -2.8%    +1.4 / -1.0 / +2.4 %
+  cpu_migrations                  1867 /  1767 /  1999        1626 /  1490 /  1703        -14.5%     12.4%      +13.1%    -12.9 / -15.7 / -14.8 %
+  cycles (x1e9)                  156.9 / 158.2 / 158.2       158.6 / 158.7 / 158.5         +0.5%      0.8%        0.0%    +1.1 / +0.3 / +0.2 %
+  instructions (x1e9)            252.7 / 258.8 / 258.7       256.8 / 259.9 / 257.8         +0.5%      2.4%        0.0%
+  ipc                            1.610 / 1.636 / 1.636       1.619 / 1.638 / 1.627          0.0%      1.6%        0.0%
+  cache_misses (x1e6)            255.5 / 247.1 / 248.0       250.8 / 244.4 / 256.9         +0.2%      3.3%       +0.4%    -1.8 / -1.1 / +3.6 %
+  cache_misses_per_kinstr        1.011 / 0.955 / 0.959       0.977 / 0.940 / 0.996         -0.4%      5.7%       +0.4%
+
+Verdict: NOT A WIN. Task 1 FAILS on this measurement.
+  - Busy-phase wake latency (the phase where the bitmap should help most) is worse on all 3 pairs:
+    p50 +32..+100% against 3.5% stock noise, and p99 +61..+131% against ~16-17% stock noise. That is a real regression, well outside noise.
+  - rq_latency_ns on wake_llc is worse on all 3 pairs (+78..+165%) against ~6% stock noise. Also a real regression.
+  - Idle-phase p50 is lower in 2 of 3 pairs (-60%, -26%) but higher in the third (+6%), and the patched values swing widely
+    (19.75k / 52.25k / 35.5k ns) while stock stays tight (47.75-49.5k ns). Not consistent, so it is not a result.
+    Idle p99 sits inside the stock noise (31.6%) and leans worse.
+  - Remote wakeups: patched mean -0.7%. Pairs go +0.8 / -4.7 / +2.0% against 1.4% stock noise, so the sign is mixed.
+    No consistent change.
+  - Cycles: flat (inside noise). wake_llc instructions/IPC drop in 2 of 3 pairs, which fits the busy-wait engine
+    spinning less while it sees more latency. That is not an efficiency gain.
+  - wake_llc cpu_migrations are much higher on patched (63949 / 15466 / 108338 vs 5203-13638), and wake-target
+    CPU changes rise too (wl_idle_cpu_changed_permille 147 / 0 / 298 vs 0 / 11 / 0). The patched idle search seems to scatter
+    wakee placement and to behave differently from run to run.
+  - general: everything sits inside noise, except cpu_migrations at -14.5% (consistent sign, but only just past the 12.4%
+    stock spread). Treat that as marginal. general shows no regression.
+
+Caveats
+  - 3 runs per side, all taken within about 7 minutes of a fresh boot, with no other jobs running.
+  - --force was passed to baseline.sh. No runs/BASELINE-task1 existed before, so nothing was replaced.
+    runs/BASELINE and runs/BASELINE-llc-idle were not touched.
+  - Final state: GRUB_DEFAULT = 7.2.9-llc-idle, which is booted now. Backup of the original grub defaults: /etc/default/grub.bak-task1.

@@ -1,0 +1,36 @@
+Linux 7.2.9 kernel-efficiency roadmap — scoreboard tasks 0–16
+=============================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, 12 CPUs, 31 GB, 1 socket / 1 NUMA / 1×12 MiB L3)
+Current boot after Task 15/16: 7.2.9-t9
+Reports under: /home/kernelmaster/kernel-measure/reports/ (mirrored in /workspace/kernel-measure/reports/)
+
+Task | Verdict | Note
+-----|---------|-----
+0 | PASS (harness) | Measurement framework built; collect/compare/tasks.conf/workloads in place.
+1 | FAIL | per-LLC idle bitmap (v1+v2) regresses wake latency / rq_latency vs stock on this 1-LLC box. No ship. See task1-before-after.txt / task1-v2-before-after.txt.
+2 | INCONCLUSIVE | One migration policy (ai-opt) — not a claimed win; 1-NUMA/1-LLC cannot prove NUMA half. task2-before-after.txt.
+3 | INCONCLUSIVE | cgroup deadline servers (t3) — not a claimed win / not clear fail. task3-before-after.txt.
+4 | BLOCKED | TCP recv zero-copy needs NIC HDS/memory-provider; wl_zc_available=0 here. No patch. task4-before-after.txt.
+5 | PASS (app-path) | Hot buffered reads: mmap beats buffered copy on stock; no kernel patch. task5-before-after.txt.
+6 | PASS (policy) | Anon fault zeroing amortized via PMD/mTHP already in-tree; no patch. task6-before-after.txt.
+7 | PASS (policy) | Prefer thp defrag=defer (+ proactive compaction); no ungated reclaim skip. task7-before-after.txt.
+8 | PASS (policy) | Order-aware THP_SWAP already keeps large anon folios; no never-split patch. task8-before-after.txt.
+9 | WEAK WIN | Lockless single-issuer io_uring (7.2.9-t9) — submission throughput up; boot left on t9. task9-before-after.txt.
+10 | PASS (harness) | Locality/cache-miss telemetry; 1-LLC caps documented. No kernel win claim. task10-before-after.txt.
+11 | PASS (policy) | util_est already in placement; NO_UTIL_EST A/B no clear win to rip out. task11-before-after.txt.
+12 | PASS (policy) | softirq/RCU defer via boot knobs works but regresses softirq_storm — leave OFF. task12-before-after.txt.
+13 | SKIP / DEFERRED | Unbound work LLC pin — not measurable on 1-LLC box. (Noted in task12 report.)
+14 | SKIP / DEFERRED | NUMA hint-fault off access path — not measurable on 1-NUMA box. (Noted in task12 report.)
+15 | PASS (leave-alone) | Hashed folio_wait_table kept; collision stress shows no herd win vs storage noise; no per-folio WQ patch. task15-before-after.txt.
+16 | PASS (leave-alone) | SysV IPC stays stock; migrate callers to POSIX mq / io_uring; no kernel redesign. task16-before-after.txt.
+
+Shipped kernels still on host (relevant)
+  7.2.9-baseline — stock measure reference
+  7.2.9-t9       — Task 9 weak win (current boot)
+  7.2.9-t3       — Task 3 prototype (inconclusive)
+  7.2.9-ai-opt   — Task 2 related (inconclusive)
+
+Open / deferred only
+  Tasks 13 and 14 await multi-LLC / multi-NUMA hardware.
+  Task 1 failed on this topology (do not re-open without more LLCs).
+  Task 4 blocked on NIC features.

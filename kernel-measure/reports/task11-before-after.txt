@@ -1,0 +1,122 @@
+Task 11 (util_est for placement) — policy/in-tree PASS on stock
+===============================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1×12 MiB L3)
+Stock measured: Tue Oct 6 2026, 09:55-09:59 PT (= 16:55-16:59 UTC) on 7.2.9-baseline
+Harness: /home/kernelmaster/kernel-measure, flags: --task 11 --schedstats
+Workloads: util_est_burst (primary), wake_llc, general
+Every run status=ok. No patched kernel was built. Baseline tree not modified.
+
+Kernels /boot present
+  stock   : 7.2.9-baseline (measured)
+  also    : 7.2.9-ai-opt, 7.2.9-t3, 7.2.9-t9, 7.0.0-34-generic
+  (host returned to 7.2.9-t9 after stock measure; no t11 image installed)
+
+Roadmap ask
+  "Use the fast util estimate for placement; do not rip out PELT."
+  UTIL_EST already on. Fixed-window (Android WALT) is the published alternative
+  for the ramp. Do not remove PELT — schedutil depends on it.
+  Workload: General purpose. Impact: Medium.
+
+Survey — what already existed (full notes: reports/task11-survey.txt)
+  - SCHED_FEAT(UTIL_EST, true); live debugfs shows UTIL_EST (toggleable via
+    echo NO_UTIL_EST|UTIL_EST > /sys/kernel/debug/sched/features).
+  - util_est_update() on dequeue: snap-up on util increases; EWMA w=1/4 on
+    decreases; margin / runnable guards.
+  - task_util_est(p) = max(PELT util_avg, util_est).
+  - Placement already reads util_est: task_fits_cpu, EAS/asym fits,
+    cpu_util() max(util_avg, util_est), energy busy_time, several LB sites.
+  - Holdouts using bare task_util(): cache-aware LLC helpers — N/A on 1 LLC.
+  - No Energy Model on this box → EAS idle. Homogeneous cpu_capacity=1024 →
+    asym capacity fitting is a no-op.
+  - WALT / fixed-window would be a major redesign parallel to PELT; out of
+    scope for a gated Task 11 patch (and roadmap forbids ripping out PELT).
+
+Decision (Approach A)
+  Stock util_est is already wired into placement. Prefer measuring existing
+  behavior + the safe debugfs knob over inventing a patch. No 7.2.9-t11,
+  no 0011-*.patch, baseline tree untouched.
+
+Harness (Task 11)
+  1. New workload util_est_burst (C): 12 burst workers (5 ms ON / 80 ms OFF)
+     + 4 always-on hogs. OFF ≈ 2.5× PELT half-life so util_avg decays while
+     util_est EWMA can still hold. Reports wl_bursts_per_sec, wl_wake_lat_*,
+     wl_burst_migrate_frac, wl_sched_feat_util_est.
+  2. tasks.conf Task 11 → util_est_burst wake_llc general; primary metrics
+     expanded with burst wl_* + ttwu_remote_delta.
+  3. workloads.conf / lib/common.sh / compare.sh labels wired.
+  4. A/B on same baseline kernel: UTIL_EST=ON (stock) vs NO_UTIL_EST.
+
+What was NOT done (and why)
+  - No kernel patch: placement already uses task_util_est / cpu_util util_est.
+  - No WALT: not a gated one-feature change; would fight "do not rip out PELT."
+  - No fake placement wins on 1 LLC / no EM / homogeneous CPUs.
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  UTIL_EST=ON  (stock default) — runs/BASELINE-task11-SETS.txt
+    S1  20261006T165510+0000-task11   (runs/BASELINE-task11 -> this)
+    S2  20261006T165558+0000-task11
+    S3  20261006T165647+0000-task11
+  UTIL_EST=OFF (debugfs NO_UTIL_EST) — runs/NOUTIL-task11-SETS.txt
+    S1  20261006T165735+0000-task11   (runs/NOUTIL-task11 -> this)
+    S2  20261006T165823+0000-task11
+    S3  20261006T165912+0000-task11
+  patched: none
+
+Primary signal — util_est_burst (same binary/args every run)
+  command: build/util_est_burst -d 15 -b 12 -h 4 -o 5000 -f 80000
+
+  metric                         ON S1      ON S2      ON S3     OFF S1     OFF S2     OFF S3
+  wl_sched_feat_util_est           on         on         on        off        off        off
+  wl_bursts                      2124       2124       2124       2124       2124       2124
+  wl_bursts_per_sec             140.97     140.99     140.99     140.98     141.00     140.96
+  wl_wake_lat_p50_ns            48000      48000      48000      48000      48000      48000
+  wl_wake_lat_p99_ns           768000      96000     192000      96000     192000      96000
+  wl_burst_migrate_frac        0.0504     0.0231     0.0391     0.0188     0.0353     0.0358
+  cycles (x1e9)                 330.7      329.7      329.4      329.8      329.5      329.6
+  ipc                           1.334      1.328      1.325      1.329      1.322      1.326
+  cpu_migrations                  142        100        177         49        156        136
+  cache_misses (x1e3)             660        534        502        530        731        586
+  rq_latency_ns                 30500      36077      57449      31571      40225      41573
+  ttwu_remote_delta              2036        352        412        298       1417        383
+
+How to read (util_est_burst)
+  Throughput is bit-identical work: 2124 bursts every run, bursts/sec within
+  ±0.03 (~0.02% relative) across ON and OFF. wake_lat_p50 stuck at 48 us
+  (timer/nanosleep granularity), not a placement signal.
+  migrate_frac / cpu_migrations / ttwu_remote / wake_lat_p99 flip sign across
+  pairs and the within-arm range already covers the between-arm gap — no
+  same-sign 3-pair win for UTIL_EST ON vs OFF.
+  Interpretation: on this homogeneous single-LLC box without an Energy Model,
+  turning util_est off does not move burst placement throughput. That does
+  NOT mean util_est is unused in the source — it means the knob cannot be
+  excited into a measurable win here. Stock default ON remains correct.
+
+Secondary — wake_llc / general (regression context only)
+  wake_llc cpu_migrations are highly noisy on both arms (ON: 8k–25k;
+  OFF: 11k–50k). general cycles ≈ 149.2–149.9e9 both arms. No same-sign
+  util_est-attributable delta. Not used as the Task 11 pass gate.
+
+Verdict: PASS (policy / in-tree)
+  - UTIL_EST is already ON and placement already uses task_util_est /
+    cpu_util util_est path in 7.2.9 CFS.
+  - Debugfs A/B (ON vs NO_UTIL_EST) on bursty load shows no measurable
+    placement benefit on this hardware (noise-bound).
+  - No gated kernel change is justified; WALT is out of scope.
+  - Harness now has a dedicated util_est_burst workload for future boxes
+    (asym capacity / EAS / multi-LLC) where the knob could matter.
+
+Boot left at: 7.2.9-t9 (UTIL_EST restored by reboot defaults; confirmed live).
+Artifacts:
+  reports/task11-before-after.txt
+  reports/task11-survey.txt
+  runs/BASELINE-task11 → 20261006T165510+0000-task11
+  runs/NOUTIL-task11   → 20261006T165735+0000-task11
+  runs/BASELINE-task11-SETS.txt
+  runs/NOUTIL-task11-SETS.txt
+  workloads/src/util_est_burst.c
+  workloads/util_est_burst.sh
+
+Next suggestion
+  Task 12 (softirq/RCU off irq-exit) — often a config/policy choice; good
+  fit for this box. Task 13 (unbound work LLC pin) needs multi-LLC hardware
+  (deferred here: 1 LLC). Task 14 (NUMA hint-fault) also weak on 1 NUMA node.

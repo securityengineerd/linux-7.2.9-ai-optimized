@@ -1,0 +1,101 @@
+Task 9 (lockless single-issuer io_uring) - stock vs 7.2.9-t9 before/after
+=========================================================================
+Host: kernelmaster@15.204.65.34 (Xeon E-2386G, nproc=12, 1 socket / 1 NUMA / 1 LLC)
+Stock measured:   Mon Oct 5 2026, 20:33-20:34 PT (= 03:33-03:34 UTC Oct 6) on 7.2.9-baseline
+Patched measured: Mon Oct 5 2026, 20:56-20:57 PT (= 03:56-03:57 UTC Oct 6) on 7.2.9-t9
+Harness: /home/kernelmaster/kernel-measure, flags: --task 9 --schedstats
+Workload: io_uring_submit = build/io_uring_submit -d 12 -b 32 -e 256
+  Ring flags: IORING_SETUP_SINGLE_ISSUER|DEFER_TASKRUN|COOP_TASKRUN
+  (implies IO_RING_F_LOCKLESS_CQ). Floods IORING_OP_NOP; drains CQ each enter.
+Every run status=ok. Fixed 12s wall — wall_time_sec is not a free variable.
+
+Kernels /boot present at measure time
+  stock   : 7.2.9-baseline
+  patched : 7.2.9-t9  (0009-io-uring-lockless-single-issuer.patch only)
+  also    : 7.2.9-ai-opt, 7.2.9-t3 (kept; /boot had room)
+  Feature : kernel.io_uring_lockless_submit=1 for all patched runs (defaults to 0)
+
+Survey (Phase 1)
+  uname at start of task: 7.2.9-t3; /boot had baseline, ai-opt, t3 (+ 7.0.0-34-generic).
+  Baseline tree: /home/kernelmaster/kernel-build/linux-7.2.9-baseline (not modified).
+  io_submit_sqes() is __must_hold(&ctx->uring_lock); io_uring_enter() always
+  mutex_lock(&ctx->uring_lock) before io_submit_sqes for !SQPOLL.
+  Completions already lockless when IO_RING_F_LOCKLESS_CQ (set for
+  DEFER_TASKRUN/TASK_COMPLETE or IOPOLL). SQPOLL path also locks around submit.
+  Safe unlock path for this prototype: SINGLE_ISSUER + LOCKLESS_CQ + !SQPOLL +
+  !SYSCALL_IOPOLL + current==submitter_task, gated OFF by sysctl. Full mutual
+  exclusion vs other uring_lock holders needs the upstream Caleb Sander Mateos
+  submitter-suspend series (not ported).
+
+Harness
+  Task 9 previously used generic storage+networking (fio default engine, not
+  io_uring / not SINGLE_ISSUER). Added targeted workload io_uring_submit
+  (C NOP hammer) and rewired tasks.conf Task 9 -> io_uring_submit.
+  Synced /workspace/kernel-measure <-> server.
+
+What the patch actually changes
+  - Gate: sysctl kernel.io_uring_lockless_submit (default 0) + static key.
+    Feature off => stock path unchanged.
+  - When on and io_lockless_submit_ok(ctx): io_uring_enter() calls
+    io_submit_sqes() WITHOUT taking ctx->uring_lock (SQ head publish / submit
+    hot path). Deferred local task work still takes the mutex afterward.
+  - SQPOLL / SYSCALL_IOPOLL / non-SINGLE_ISSUER / non-LOCKLESS_CQ unchanged.
+  - Ring ABI unchanged.
+  - Known limit: concurrent uring_lock takers (io-wq UNLOCKED issue, cancel/
+    register from another task) can race while feature is ON — leave OFF except
+    under the single-issuer DEFER_TASKRUN hammer. Defaults OFF for that reason.
+
+How to enable
+  sudo sysctl -w kernel.io_uring_lockless_submit=1
+
+Run sets (under /home/kernelmaster/kernel-measure/runs/)
+  stock S1  20261006T033329+0000-task9   (runs/BASELINE-task9 -> this)
+  stock S2  20261006T033342+0000-task9
+  stock S3  20261006T033355+0000-task9
+  patch P1  20261006T035623+0000-task9
+  patch P2  20261006T035636+0000-task9
+  patch P3  20261006T035649+0000-task9
+  compare.sh: runs/compare-task9/{S1-vs-P1,S2-vs-P2,S3-vs-P3,S1-vs-S2}.txt
+
+How to read
+  Noise = stock-vs-stock (max-min)/mean over S1..S3.
+  A delta counts only if bigger than that noise AND same sign on all 3 pairs.
+  wall_time_sec is pinned by -d 12; treat wl_nops_per_sec and cycles/nop as
+  the real throughput signals. Raw cycles over a fixed busy interval stay flat
+  when the CPU is saturated.
+
+io_uring_submit                     stock S1 / S2 / S3          patched P1 / P2 / P3
+  wl_nops_per_sec (x1e6)           47.42 / 47.56 / 47.33       47.84 / 47.85 / 47.79
+  wl_completed (x1e6)             569.07 /570.66 /567.98      574.03 /574.19 /573.47
+  cycles (x1e9)                     56.32 / 56.32 / 56.32       56.30 / 56.32 / 56.32
+  instructions (x1e9)              201.5 / 202.1 / 201.2       203.5 / 203.6 / 203.3
+  wall_time_sec                    12.033 /12.036 /12.039      12.034 /12.034 /12.026
+  cache_misses (x1e3)              175.1 / 151.3 / 188.5       181.3 / 154.5 / 163.6
+  cycles_per_nop (derived)          98.97 / 98.69 / 99.15       98.08 / 98.08 / 98.20
+
+Pair deltas (P-S) / stock noise
+  wl_nops_per_sec   +0.87 / +0.62 / +0.97 pct   noise ~0.47pct   UP all 3; clears noise
+  cycles_per_nop    -0.90 / -0.62 / -0.96 pct   (derived)        DOWN all 3
+  cycles            -0.03 / -0.00 / +0.00 pct   noise ~0.006pct  flat (busy fixed wall)
+  instructions      +0.97 / +0.72 / +1.06 pct   noise ~0.47pct   UP all 3 (more NOPs)
+  wall_time_sec     +0.01 / -0.02 / -0.11 pct   noise ~0.05pct   flat by construction
+  cache_misses      +3.5  / +2.1  / -13.2 pct   noise ~22pct     mixed; inside noise
+
+Verdict: WEAK WIN on submission throughput — not a claimed large win.
+  - wl_nops_per_sec rises on every pair (+0.62..+0.97pct) and clears stock
+    run-to-run noise (~0.47pct). Same-sign on all 3.
+  - Derived cycles/nop falls ~0.6-1.0pct on every pair (same story: more NOPs
+    for the same busy cycles).
+  - Primary cycles and wall_time_sec are flat: the workload burns a fixed
+    12s of CPU; unlocking the mutex does not free wall time, it raises NOP
+    rate inside that window.
+  - cache_misses are too noisy (~22pct stock swing) to claim anything.
+  - Absolute gain is small (~0.8pct NOP throughput). Matches a lightly
+    contended uncontended-mutex elision on a single-threaded enter loop.
+  - Feature remains default OFF; do not ship as-is without the upstream
+    submitter-suspend mutual-exclusion work for non-submitter lock holders.
+
+Patch path
+  /home/kernelmaster/kernel-measure/patches/0009-io-uring-lockless-single-issuer.patch
+  /workspace/kernel-measure/patches/0009-io-uring-lockless-single-issuer.patch
+  Tree: /home/kernelmaster/kernel-build/linux-7.2.9-t9  LOCALVERSION=-t9
