@@ -95,3 +95,6 @@ See [`RESULTS.md`](RESULTS.md) and [`kernel-measure/reports/scoreboard-tasks-0-1
 1. Open `RESULTS.md`.
 2. Open `kernel-measure/reports/scoreboard-tasks-0-16.txt`.
 3. Drill into `kernel-measure/reports/taskN-before-after.txt` for any task of interest.
+
+## Hope everyone enjoys! 
+- Joshua Marcum 
